@@ -6,6 +6,9 @@ export class Input {
     this.look = { x: 0, y: 0 };
     this.zoom = 0;
     this.jumpPressed = false;
+    this.interactPressed = false;
+    this.mouseFire = false;
+    this.touchFire = false;
     this.move = { x: 0, y: 0 }; // from touch joystick
     this.pointerLock = pointerLock;
     this.dragging = false;
@@ -19,6 +22,7 @@ export class Input {
       const code = e.code;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) e.preventDefault();
       if (code === 'Space' && !this.keys.has('Space')) this.jumpPressed = true;
+      if (code === 'KeyF' && !this.keys.has('KeyF')) this.interactPressed = true;
       this.keys.add(code);
     });
     this.on(window, 'keyup', (e) => this.keys.delete(e.code));
@@ -26,6 +30,7 @@ export class Input {
 
     this.on(element, 'pointerdown', (e) => {
       if (e.pointerType === 'touch') return;
+      if (e.button === 0 && document.pointerLockElement === element) this.mouseFire = true;
       if (this.pointerLock && document.pointerLockElement !== element) {
         try {
           const p = element.requestPointerLock?.();
@@ -36,7 +41,7 @@ export class Input {
       this.lastX = e.clientX;
       this.lastY = e.clientY;
     });
-    this.on(window, 'pointerup', () => { this.dragging = false; });
+    this.on(window, 'pointerup', (e) => { this.dragging = false; if (e.button === 0) this.mouseFire = false; });
     this.on(window, 'pointermove', (e) => {
       if (e.pointerType === 'touch') return;
       if (document.pointerLockElement === element) {
@@ -87,7 +92,8 @@ export class Input {
   attachTouchControls(container) {
     const wrap = document.createElement('div');
     wrap.className = 'touch-controls';
-    wrap.innerHTML = '<div class="joy"><div class="joy-knob"></div></div><button class="jump-btn" type="button" aria-label="Jump">Jump</button>';
+    wrap.innerHTML = '<div class="joy"><div class="joy-knob"></div></div><button class="jump-btn" type="button" aria-label="Jump">Jump</button>'
+      + '<button class="fire-btn" type="button" aria-label="Fire" hidden>Fire</button><button class="use-btn" type="button" aria-label="Get in or out" hidden>Drive</button>';
     container.appendChild(wrap);
     this.touchUI = wrap;
     const joy = wrap.querySelector('.joy');
@@ -120,6 +126,14 @@ export class Input {
     this.on(jump, 'touchstart', (e) => { e.stopPropagation(); e.preventDefault(); this.jumpPressed = true; this.keys.add('TouchJump'); }, { passive: false });
     this.on(jump, 'touchend', () => this.keys.delete('TouchJump'));
     this.on(jump, 'click', () => { this.jumpPressed = true; });
+    const fire = wrap.querySelector('.fire-btn');
+    const use = wrap.querySelector('.use-btn');
+    this.fireButton = fire;
+    this.useButton = use;
+    this.on(fire, 'touchstart', (e) => { e.stopPropagation(); e.preventDefault(); this.touchFire = true; }, { passive: false });
+    this.on(fire, 'touchend', () => { this.touchFire = false; });
+    this.on(use, 'touchstart', (e) => { e.stopPropagation(); e.preventDefault(); this.interactPressed = true; }, { passive: false });
+    this.on(use, 'click', () => { this.interactPressed = true; });
   }
 
   /** Movement direction from keys and joystick: x = right, y = forward. */
@@ -152,6 +166,26 @@ export class Input {
     const j = this.jumpPressed;
     this.jumpPressed = false;
     return j;
+  }
+
+  /** True while the player holds a fire control. */
+  get firing() {
+    return this.mouseFire || this.touchFire || this.keys.has('KeyK');
+  }
+
+  consumeInteract() {
+    const v = this.interactPressed;
+    this.interactPressed = false;
+    return v;
+  }
+
+  /** Shows or hides the on-screen Fire and Drive buttons. */
+  setTouchButtons({ fire, use, useLabel }) {
+    if (this.fireButton) this.fireButton.hidden = !fire;
+    if (this.useButton) {
+      this.useButton.hidden = !use;
+      if (useLabel) this.useButton.textContent = useLabel;
+    }
   }
 
   get running() {

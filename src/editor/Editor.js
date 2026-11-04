@@ -16,6 +16,7 @@ import {
 import { prefabToEntity } from '../core/prefabs.js';
 import { DEG, deepClone, newId, round } from '../core/util.js';
 import { logger } from '../core/log.js';
+import { ensureModel, forgetModel } from '../engine/models.js';
 
 const MAX_HISTORY = 120;
 const _m = new THREE.Matrix4();
@@ -26,6 +27,7 @@ export class Editor {
     this.container = container;
     this.listeners = new Map();
     this.doc = null;
+    this.assets = new Map(); // imported models, kept out of the undo history (they can be big)
     this.levelId = null;
     this._view = null;
     this.selection = [];
@@ -42,6 +44,10 @@ export class Editor {
     this.dirty = false;
 
     this.view = new WorldView({ mode: 'edit' });
+    this.view.onRebuild = (id) => {
+      if (this.selection.includes(id)) this.refreshSelection();
+      this.emit('rebuild', id);
+    };
     this.scene = this.view.scene;
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 3000);
     this.camera.position.set(14, 11, 16);
@@ -100,8 +106,63 @@ export class Editor {
   /** The level being edited, as a view. */
   get project() {
     if (!this.doc) return null;
-    if (!this._view) this._view = levelView(this.doc, this.levelId);
+    if (!this._view) {
+      this._view = levelView(this.doc, this.levelId);
+      this._view.models = [...this.assets.values()].map((a) => ({ id: a.id, name: a.name, animations: a.animations }));
+    }
     return this._view;
+  }
+
+  /** The whole project including imported models, for saving and exporting. */
+  fullDoc() {
+    return { ...this.doc, assets: [...this.assets.values()] };
+  }
+
+  addAsset(asset) {
+    this.assets.set(asset.id, asset);
+    this._view = null;
+    ensureModel(asset).catch((err) => logger.error('editor', `Could not load the model "${asset.name}": ${err.message}`));
+    this.emit('assets');
+  }
+
+  assetUsage(id) {
+    let n = 0;
+    for (const list of [...this.doc.levels.map((l) => l.objects), ...this.doc.prefabs.map((p) => p.objects)]) {
+      for (const o of list) if (o.shape === 'model' && o.props?.asset === id) n++;
+    }
+    return n;
+  }
+
+  deleteAsset(id) {
+    if (this.assetUsage(id)) return false;
+    this.assets.delete(id);
+    forgetModel(id);
+    this._view = null;
+    this.emit('assets');
+    return true;
+  }
+
+  renameAsset(id, name) {
+    const a = this.assets.get(id);
+    if (!a || !name) return;
+    a.name = String(name).trim().slice(0, 60) || a.name;
+    this._view = null;
+    this.dirty = true;
+    this.emit('assets');
+  }
+
+  /** Puts a copy of an imported model in front of the camera, resting on the floor. */
+  placeModel(assetId) {
+    const asset = this.assets.get(assetId);
+    if (!asset) return null;
+    const [x, , z] = this.dropPoint();
+    const entity = createEntity('model', { name: asset.name, position: [x, 1, z], scale: [2, 2, 2], physics: 'static', props: { asset: assetId } });
+    this.mutate((d) => { d.objects.push(entity); }, { label: `Add ${asset.name}` });
+    this.select(entity.id);
+    ensureModel(asset).then(() => {
+      requestAnimationFrame(() => { if (this.getEntity(entity.id)) this.dropSelectedToFloor(); });
+    }).catch(() => {});
+    return entity;
   }
 
   get level() {
@@ -109,7 +170,11 @@ export class Editor {
   }
 
   load(project, { levelId = null } = {}) {
-    this.doc = normalizeProject(project);
+    const p = normalizeProject(project);
+    this.assets = new Map();
+    for (const a of p.assets) this.addAsset(a);
+    p.assets = [];
+    this.doc = p;
     this.levelId = this.doc.levels.some((l) => l.id === levelId) ? levelId : this.doc.startLevel;
     this._view = null;
     this.undoStack = [];
@@ -708,6 +773,7 @@ export class Editor {
   // ---------- loop ----------
   frame(dt = 0) {
     this.updateFly(dt);
+    this.view.tick(dt);
     if (!this.flying) this.orbit.update();
     if (this.boxes.length && !this.dragging) for (const b of this.boxes) b.setFromObject(b.userData.target);
     this.view.updateSun(this.orbit.target);

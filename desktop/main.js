@@ -191,6 +191,7 @@ async function buildMenu() {
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => send('save') },
         { label: 'Save As…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('save-as') },
         { type: 'separator' },
+        { label: 'Import 3D Model…', accelerator: 'CmdOrCtrl+I', click: () => send('import-model') },
         { label: 'Export Playable Game…', accelerator: 'CmdOrCtrl+E', click: () => send('export') },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit', label: 'Exit' },

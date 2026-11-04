@@ -188,11 +188,13 @@ function collectIds(node) {
 
 // ---------------------------------------------------------------- Content Browser
 export class ContentBrowser {
-  constructor(root, editor, { onOpenCode } = {}) {
+  constructor(root, editor, { onOpenCode, onImportModel } = {}) {
     this.root = root;
     this.editor = editor;
     this.onOpenCode = onOpenCode;
+    this.onImportModel = onImportModel;
     this.section = 'levels';
+    editor.on('assets', () => this.render());
     this.nav = h('nav', { class: 'cb-nav', 'aria-label': 'Content' });
     this.body = h('div', { class: 'cb-body' });
     root.append(this.nav, this.body);
@@ -212,6 +214,7 @@ export class ContentBrowser {
     const sections = [
       ['levels', 'Levels', doc.levels.length],
       ['prefabs', 'My prefabs', doc.prefabs.length],
+      ['models', '3D models', this.editor.assets.size],
       ['library', 'Built-in library', ''],
       ['scripts', 'Scripts', ''],
     ];
@@ -222,6 +225,7 @@ export class ContentBrowser {
     clear(this.body);
     if (this.section === 'levels') this.renderLevels(doc);
     else if (this.section === 'prefabs') this.renderPrefabs(doc);
+    else if (this.section === 'models') this.renderModels();
     else if (this.section === 'library') this.renderLibrary();
     else this.renderScripts();
   }
@@ -307,6 +311,39 @@ export class ContentBrowser {
       { label: 'Rename…', icon: 'file', run: async () => { const n = await askText('Rename prefab', { value: p.name, ok: 'Rename' }); if (n) ed.renamePrefab(p.id, n); } },
       '-',
       { label: 'Delete prefab', icon: 'trash', danger: true, run: () => ed.deletePrefab(p.id) },
+    ]);
+  }
+
+  renderModels() {
+    const ed = this.editor;
+    this.body.append(h('div', { class: 'cb-bar' },
+      h('button', { type: 'button', class: 'btn btn-small btn-primary', onclick: () => this.onImportModel?.() }, icon('plus'), 'Import 3D model'),
+      h('span', { class: 'muted small' }, 'Single-file .glb or .gltf models from Blender, Sketchfab, Mixamo and other tools. Models are saved inside the project.')));
+    const assets = [...ed.assets.values()];
+    if (!assets.length) {
+      this.body.append(h('p', { class: 'muted panel-pad' }, 'No models yet.'));
+      return;
+    }
+    this.body.append(h('div', { class: 'cb-grid' }, assets.map((a) => {
+      const used = ed.assetUsage(a.id);
+      return h('div', { class: 'asset-card', oncontextmenu: (e) => { e.preventDefault(); this.modelMenu(e, a); } },
+        h('button', { type: 'button', class: 'asset-thumb', onclick: () => ed.placeModel(a.id), title: `Place ${a.name}` }, a.thumb ? h('img', { src: a.thumb, alt: '' }) : icon('cube')),
+        h('div', { class: 'asset-meta' }, h('strong', {}, a.name),
+          h('span', { class: 'muted small' }, `${(a.bytes / 1048576).toFixed(1)} MB · used ${used}×${a.animations.length ? ` · ${a.animations.length} anim` : ''}`)),
+        h('button', { type: 'button', class: 'icon-btn small asset-more', 'aria-label': `More for ${a.name}`, onclick: (e) => this.modelMenu(e, a) }, icon('menu')));
+    })));
+  }
+
+  modelMenu(e, a) {
+    const ed = this.editor;
+    const used = ed.assetUsage(a.id);
+    contextMenu(e.clientX, e.clientY, [
+      { label: 'Place in level', icon: 'plus', run: () => ed.placeModel(a.id) },
+      { label: 'Rename…', icon: 'file', run: async () => { const n = await askText('Rename model', { value: a.name, ok: 'Rename' }); if (n) ed.renameAsset(a.id, n); } },
+      '-',
+      { label: used ? `In use ${used}× (remove those first)` : 'Delete model', icon: 'trash', danger: true, disabled: used > 0, run: async () => {
+        if (await confirmDialog('Delete model', `Delete "${a.name}" from this project? This cannot be undone.`, { ok: 'Delete', danger: true })) ed.deleteAsset(a.id);
+      } },
     ]);
   }
 
@@ -401,6 +438,8 @@ self.hide(); self.show(); self.destroy();
 self.distanceToPlayer();        // meters
 self.touchingPlayer;            // true or false
 self.data.counter = 0;          // your own values
+self.health;                    // with a "Can be destroyed" behavior
+self.damage(1);
 
 // game
 game.time; game.score; game.lives; game.level; game.levelNumber;
@@ -413,7 +452,7 @@ game.giveItem("key"); game.hasItem("key");
 
 // player
 player.position;               // a copy (THREE.Vector3)
-player.grounded;
+player.grounded; player.driving;
 player.jump(12); player.hurt(1); player.teleport(0, 5, 0);
 
 // world

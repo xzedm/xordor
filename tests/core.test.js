@@ -131,3 +131,22 @@ describe('project files', async () => {
     expect(() => parseProjectFile('{"hello": 1}')).toThrow();
   });
 });
+
+describe('weapons and assets', async () => {
+  const { normalizeAsset, normalizeSettings } = await import('../src/core/project.js');
+  it('keeps only known weapons', () => {
+    expect(normalizeSettings({ weapon: 'cannon' }).weapon).toBe('cannon');
+    expect(normalizeSettings({ weapon: 'laser sword' }).weapon).toBe('none');
+  });
+  it('accepts model data URLs and rejects anything else', () => {
+    const a = normalizeAsset({ name: 'Robot', data: 'data:model/gltf-binary;base64,Z2xURg==', animations: ['Wave'] });
+    expect(a).toMatchObject({ name: 'Robot', kind: 'model', animations: ['Wave'] });
+    expect(a.id).toMatch(/^asset_/);
+    expect(normalizeAsset({ data: 'https://example.com/robot.glb' })).toBeNull();
+    expect(normalizeAsset(null)).toBeNull();
+  });
+  it('saves models inside the project file', () => {
+    const p = normalizeProject({ name: 'With model', assets: [{ id: 'asset_1', name: 'Robot', data: 'data:model/gltf-binary;base64,AAAA' }] });
+    expect(p.assets).toHaveLength(1);
+  });
+});

@@ -122,6 +122,38 @@ export const BEHAVIORS = {
       needs: { type: 'text', label: 'Item needed', default: 'key' },
     },
   },
+  health: {
+    label: 'Can be destroyed',
+    group: 'Combat',
+    desc: 'Takes damage when the player shoots it, and disappears when its health runs out.',
+    params: {
+      hp: { type: 'number', label: 'Health (hits with the blaster)', default: 3, min: 0.1, max: 10000, step: 1 },
+      points: { type: 'number', label: 'Points for destroying it', default: 5, min: -10000, max: 10000, step: 1 },
+      effect: { type: 'select', label: 'When destroyed', options: ['explode', 'pop', 'vanish'], default: 'explode' },
+    },
+  },
+  shooter: {
+    label: 'Shoots at the player',
+    group: 'Combat',
+    desc: 'Fires at the player when they come close.',
+    params: {
+      every: { type: 'number', label: 'Seconds between shots', default: 1.5, min: 0.1, max: 60, step: 0.1 },
+      range: { type: 'number', label: 'Range (meters)', default: 22, min: 1, max: 500, step: 1 },
+      speed: { type: 'number', label: 'Shot speed (m/s)', default: 18, min: 1, max: 200, step: 1 },
+      damage: { type: 'number', label: 'Lives lost per hit', default: 1, min: 0, max: 99, step: 1 },
+      color: { type: 'color', label: 'Shot color', default: '#ff4d4d' },
+    },
+  },
+  vehicle: {
+    label: 'Drivable vehicle',
+    group: 'Driving',
+    desc: 'The player can get in and drive it. Press F next to it to get in or out.',
+    params: {
+      speed: { type: 'number', label: 'Top speed (m/s)', default: 26, min: 1, max: 150, step: 1 },
+      grip: { type: 'number', label: 'Tire grip', default: 1.6, min: 0.2, max: 10, step: 0.1 },
+      startInside: { type: 'boolean', label: 'The player starts in this vehicle', default: false },
+    },
+  },
   spawner: {
     label: 'Drop or throw balls',
     group: 'Game rules',

@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { buildShape, SHAPES } from '../core/shapes.js';
 import { DEG } from '../core/util.js';
 import { getMaterial, materialFactory, textTexture } from './materials.js';
+import { buildModelParts, whenModelReady } from './models.js';
 
 const SKY_VERTEX = /* glsl */ `
   varying vec3 vWorld;
@@ -41,6 +42,9 @@ export class WorldView {
     if (WorldView.environmentMap) this.scene.environment = WorldView.environmentMap;
     this.objects = new Map(); // id -> THREE.Group
     this.entityCache = new Map(); // id -> JSON string, to skip unchanged rebuilds
+    this.mixers = new Map(); // id -> THREE.AnimationMixer for animated models
+    this.pending = new Map(); // id -> cancel function while a model loads
+    this.onRebuild = null; // called with an id when a loaded model replaces its placeholder
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 1);
     this.scene.add(this.hemi);
@@ -154,7 +158,26 @@ export class WorldView {
   }
 
   buildObject(entity) {
-    const group = buildShape(entity, { mat: materialFactory(entity), textTexture });
+    const group = buildShape(entity, { mat: materialFactory(entity), textTexture, buildModel: buildModelParts });
+    const pendingPart = group.children.find((c) => c.userData.pendingModel !== undefined);
+    if (pendingPart && pendingPart.userData.pendingModel) {
+      const assetId = pendingPart.userData.pendingModel;
+      this.pending.get(entity.id)?.();
+      this.pending.set(entity.id, whenModelReady(assetId, () => {
+        this.pending.delete(entity.id);
+        const json = this.entityCache.get(entity.id);
+        if (!json) return;
+        this.entityCache.delete(entity.id);
+        this.addOrUpdate(JSON.parse(json));
+        this.onRebuild?.(entity.id);
+      }));
+    }
+    const anim = group.children.find((c) => c.userData.animation)?.userData.animation;
+    if (anim) {
+      const mixer = new THREE.AnimationMixer(anim.root);
+      mixer.clipAction(anim.clip).play();
+      this.mixers.set(entity.id, mixer);
+    }
     group.name = entity.name;
     group.userData.entityId = entity.id;
     group.userData.shape = entity.shape;
@@ -213,11 +236,15 @@ export class WorldView {
   }
 
   removeObject(id) {
+    this.pending.get(id)?.();
+    this.pending.delete(id);
+    this.mixers.get(id)?.stopAllAction();
+    this.mixers.delete(id);
     const obj = this.objects.get(id);
     if (!obj) return;
     this.scene.remove(obj);
     obj.traverse((o) => {
-      if (o.isMesh) {
+      if (o.isMesh && !o.userData.sharedGeometry) {
         o.geometry.dispose();
         if (o.material?.map?.isCanvasTexture && o.material.isMeshBasicMaterial) o.material.map.dispose();
       }
@@ -235,6 +262,11 @@ export class WorldView {
       this.addOrUpdate(e);
     }
     for (const id of [...this.objects.keys()]) if (!ids.has(id)) this.removeObject(id);
+  }
+
+  /** Plays model animations. */
+  tick(dt) {
+    for (const m of this.mixers.values()) m.update(dt);
   }
 
   dispose() {

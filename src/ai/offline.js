@@ -11,6 +11,7 @@ const NUMBER_WORDS = {
 
 // Phrase -> prefab key. Longer phrases are checked first.
 const THINGS = [
+  ['race car', 'car'], ['car', 'car'], ['vehicle', 'car'], ['turret', 'turret'], ['cannon tower', 'turret'], ['target', 'target'],
   ['moving platform', 'mover'], ['falling platform', 'crumble'], ['spinning bar', 'spinner'], ['spinner', 'spinner'],
   ['ball dropper', 'dropper'], ['bouncy ball', 'bouncyball'], ['bounce pad', 'bouncepad'], ['trampoline', 'bouncepad'],
   ['jump pad', 'bouncepad'], ['speed pad', 'speedpad'], ['speed boost', 'speedpad'], ['player start', 'start'],
@@ -27,7 +28,7 @@ const THINGS = [
 
 const PREFAB_SHAPE = {
   mover: 'box', crumble: 'box', spinner: 'box', dropper: 'cloud', bouncyball: 'sphere', bouncepad: 'bouncepad', speedpad: 'speedpad',
-  start: 'spawn', pine: 'pine', heart: 'heart', goal: 'flag', checkpoint: 'checkpoint', portal: 'portal', platform: 'box', wall: 'box',
+  car: 'car', turret: 'turret', target: 'target', start: 'spawn', pine: 'pine', heart: 'heart', goal: 'flag', checkpoint: 'checkpoint', portal: 'portal', platform: 'box', wall: 'box',
   pillar: 'cylinder', stairs: 'stairs', ramp: 'ramp', house: 'house', crate: 'box', barrel: 'cylinder', sign: 'sign', water: 'box',
   tree: 'tree', rock: 'rock', bush: 'bush', cloud: 'cloud', coin: 'coin', star: 'star', gem: 'gem', key: 'key', door: 'box', enemy: 'enemy',
   spikes: 'spikes', lava: 'box', lamp: 'light', cube: 'box', ball: 'sphere', cylinder: 'cylinder', cone: 'cone', pyramid: 'pyramid',
@@ -103,6 +104,12 @@ export function offlineAssistant(input, ctx = {}) {
   if (/\b(obstacle course|parkour|platformer|jump(ing)? course)\b/.test(text)) {
     return { message: 'Here is an obstacle course: jump across the platforms, grab the coins and reach the flag!', actions: obstacleCourse(focus, color) };
   }
+  if (/\b(race track|racetrack|racing|race game|rally)\b/.test(text)) {
+    return { message: 'Built a race: drive through the checkpoints to the finish before time runs out!', actions: raceTrack(focus) };
+  }
+  if (/\b(shooting range|shooting gallery|shooter game|robot attack)\b/.test(text)) {
+    return { message: 'Built a shooting range: hit every target!', actions: shootingRange(focus) };
+  }
   if (/\bmaze\b/.test(text)) {
     return { message: 'Built a maze! Find your way to the flag in the far corner.', actions: maze(focus, color) };
   }
@@ -124,6 +131,10 @@ export function offlineAssistant(input, ctx = {}) {
   }
 
   // Camera and rules.
+  if (/\b(rapid fire|machine gun|minigun)\b/.test(text)) { actions.push({ do: 'settings', set: { weapon: 'rapid' } }); notes.push('The player has a rapid-fire weapon now. Shoot with the mouse or K.'); }
+  else if (/\b(cannon|bazooka|rocket)\b/.test(text) && /\b(give|weapon|shoot|player|gun)\b/.test(text)) { actions.push({ do: 'settings', set: { weapon: 'cannon' } }); notes.push('The player has a cannon now. Shoot with the mouse or K.'); }
+  else if (/\b(gun|blaster|weapon|shooting|shoot)\b/.test(text) && !/\b(no|remove|without|stop|turn off)\b/.test(text) && !findThing(text)) { actions.push({ do: 'settings', set: { weapon: 'blaster' } }); notes.push('The player can shoot now: left mouse button or K. Things need "Can be destroyed" to be shot.'); }
+  if (/\b(no|remove|without|stop|turn off) (the )?(gun|weapon|shooting)\b/.test(text)) { actions.push({ do: 'settings', set: { weapon: 'none' } }); notes.push('Shooting is off.'); }
   if (/\bfirst[- ]person\b/.test(text)) { actions.push({ do: 'settings', set: { camera: 'first-person' } }); notes.push('The game now uses a first-person camera.'); }
   if (/\bthird[- ]person\b/.test(text)) { actions.push({ do: 'settings', set: { camera: 'third-person' } }); notes.push('The camera now follows behind the player.'); }
   if (/\btop[- ]down\b|\bfrom above\b/.test(text)) { actions.push({ do: 'settings', set: { camera: 'top-down' } }); notes.push('The camera now looks down from above.'); }
@@ -296,6 +307,43 @@ function maze(focus, color) {
   actions.push({ do: 'add', object: { prefab: 'start', position: [ox + cell / 2, 0.06, oz - 2] } });
   actions.push({ do: 'settings', set: { winCondition: 'goal' } });
   return actions;
+}
+
+export function raceTrack(focus = [0, 0, 0]) {
+  const [x, , z] = focus;
+  const actions = [
+    { do: 'environment', set: { preset: 'desert', groundSize: 640 } },
+    { do: 'settings', set: { winCondition: 'goal', timeLimit: 75, lives: 0, camera: 'third-person' } },
+    { do: 'add', object: { prefab: 'start', position: [x, 0.06, z] } },
+    { do: 'add', object: { prefab: 'car', name: 'Race car', position: [x, 0.8, z - 4], rotation: [0, 180, 0], behaviors: [{ type: 'vehicle', params: { startInside: true, speed: 34 } }] } },
+  ];
+  // A winding route of checkpoints heading away from the start (-z).
+  const route = [[0, -40], [25, -80], [10, -130], [-25, -170], [-10, -220], [20, -260]];
+  route.forEach(([dx, dz], i) => {
+    const px = x + dx;
+    const pz = z + dz;
+    if (i < route.length - 1) actions.push({ do: 'add', object: { prefab: 'checkpoint', name: `Checkpoint ${i + 1}`, position: [px, 2.55, pz], scale: [3, 3, 3] } });
+    // Barrels mark both sides of each gate.
+    actions.push({ do: 'add', object: { prefab: 'barrel', position: [px - 6, 0.55, pz], physics: 'dynamic' } });
+    actions.push({ do: 'add', object: { prefab: 'barrel', position: [px + 6, 0.55, pz], physics: 'dynamic' } });
+  });
+  const [fx, fz] = route[route.length - 1];
+  actions.push({ do: 'add', object: { prefab: 'goal', name: 'Finish', position: [x + fx, 3.75, z + fz - 4], scale: [3, 3, 3] } });
+  actions.push({ do: 'add', object: { prefab: 'ramp', position: [x + 12, 1.2, z - 60], scale: [6, 2.4, 10], rotation: [0, 160, 0] } });
+  actions.push({ do: 'addMany', object: { prefab: 'crate' }, count: 6, layout: 'tower', center: [x + 2, 0.5, z - 105], spacing: 1.01 });
+  actions.push({ do: 'add', object: { prefab: 'speedpad', position: [x + 22, 0.04, z - 150], scale: [4, 1, 4] } });
+  actions.push({ do: 'addMany', object: { prefab: 'rock' }, count: 18, layout: 'random', center: [x, 0, z - 140], area: [160, 0, 300], onGround: true, seed: 11 });
+  return actions;
+}
+
+export function shootingRange(focus = [0, 0, 0]) {
+  const [x, , z] = focus;
+  return [
+    { do: 'settings', set: { weapon: 'blaster', winCondition: 'defeat-all', lives: 3, timeLimit: 60, camera: 'third-person' } },
+    { do: 'addMany', object: { prefab: 'target' }, count: 5, layout: 'line', center: [x, 0.95, z - 14], spacing: 4 },
+    { do: 'addMany', object: { prefab: 'target', behaviors: [{ type: 'patrol', params: { axis: 'x', distance: 6, speed: 2 } }] }, count: 3, layout: 'line', center: [x - 3, 0.95, z - 24], spacing: 5 },
+    { do: 'addMany', object: { prefab: 'wall', scale: [3, 1.2, 0.5], color: '#9a7b5a', pattern: 'wood' }, count: 4, layout: 'line', center: [x, 0.6, z - 6], spacing: 5 },
+  ];
 }
 
 function castle(focus, color) {

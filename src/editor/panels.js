@@ -4,17 +4,21 @@ import { clear, h, icon, openDialog, toast } from '../ui/dom.js';
 import { PREFAB_GROUPS } from '../core/prefabs.js';
 import { SHAPES } from '../core/shapes.js';
 import { BEHAVIORS, BEHAVIOR_KEYS, defaultParams } from '../core/behaviors.js';
-import { CAMERAS, LOOKS, PATTERNS, PHYSICS, WIN_CONDITIONS, halfHeight } from '../core/project.js';
+import { CAMERAS, LOOKS, PATTERNS, PHYSICS, WEAPONS, WIN_CONDITIONS, halfHeight } from '../core/project.js';
 import { ENV_PRESETS } from '../core/environment.js';
 import { renderThumbnails } from './thumbnails.js';
 import { checkField, colorField, numberField, rangeField, section, selectField, textField, vec3Field } from './fields.js';
 
 // ---------------------------------------------------------------- Add panel
 export class AddPanel {
-  constructor(root, editor) {
+  constructor(root, editor, { onImportModel } = {}) {
     this.root = root;
     this.editor = editor;
+    this.onImportModel = onImportModel;
     this.query = '';
+    this.modelsSection = h('section', { class: 'panel-section tile-group models-group' });
+    editor.on('assets', () => this.renderModels());
+    editor.on('change', ({ source }) => { if (source === 'load') this.renderModels(); });
     this.render();
     renderThumbnails().then((thumbs) => {
       for (const img of this.root.querySelectorAll('img[data-thumb]')) {
@@ -31,7 +35,10 @@ export class AddPanel {
       this.query = search.value.trim().toLowerCase();
       this.filter();
     });
-    this.root.append(h('div', { class: 'panel-pad' }, search));
+    this.root.append(h('div', { class: 'panel-pad add-top' }, search,
+      this.onImportModel ? h('button', { type: 'button', class: 'btn btn-small import-btn', title: 'Bring in a .glb or .gltf model from Blender, Sketchfab, Mixamo and other tools', onclick: () => this.onImportModel() }, icon('cube'), 'Import 3D model') : null));
+    this.root.append(this.modelsSection);
+    this.renderModels();
     for (const group of PREFAB_GROUPS) {
       const grid = h('div', { class: 'tile-grid' }, group.items.map((item) => h('button', {
         type: 'button',
@@ -42,6 +49,18 @@ export class AddPanel {
       }, h('img', { alt: '', dataset: { thumb: item.key }, width: 56, height: 56 }), h('span', {}, item.label))));
       this.root.append(h('section', { class: 'panel-section tile-group' }, h('h3', { class: 'section-title' }, group.label), grid));
     }
+  }
+
+  renderModels() {
+    const assets = [...this.editor.assets.values()];
+    clear(this.modelsSection);
+    this.modelsSection.hidden = !assets.length;
+    if (!assets.length) return;
+    this.modelsSection.append(h('h3', { class: 'section-title' }, 'My 3D models'), h('div', { class: 'tile-grid' }, assets.map((a) => h('button', {
+      type: 'button', class: 'tile has-thumb', title: `Add ${a.name}`, dataset: { label: `${a.name} model imported`.toLowerCase() },
+      onclick: () => this.editor.placeModel(a.id),
+    }, a.thumb ? h('img', { alt: '', src: a.thumb, width: 56, height: 56 }) : h('span', { class: 'tile-icon' }, icon('cube')), h('span', {}, a.name)))));
+    this.filter();
   }
 
   filter() {
@@ -179,15 +198,33 @@ export class Inspector {
         h('button', { type: 'button', class: 'btn btn-small', title: 'Drop onto whatever is below (End)', onclick: () => ed.dropSelectedToFloor() }, icon('ground'), pro ? 'Snap to floor' : 'Put on ground'),
         h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.set({ rotation: [0, 0, 0], scale: [1, 1, 1] }, true) }, 'Reset turn and size')));
 
-    const look = section(pro ? 'Rendering' : 'Look',
-      colorField('Color', e.color, (c) => this.set({ color: c }, true)),
-      selectField('Material', e.look, LOOKS, (v) => this.set({ look: v }, true)),
-      selectField('Pattern', e.pattern, PATTERNS, (v) => this.set({ pattern: v }, true)),
-      checkField('Visible while playing', e.visible, (v) => this.set({ visible: v }, true)));
+    const isModel = e.shape === 'model';
+    const look = isModel
+      ? section(pro ? 'Rendering' : 'Look', checkField('Visible while playing', e.visible, (v) => this.set({ visible: v }, true)))
+      : section(pro ? 'Rendering' : 'Look',
+        colorField('Color', e.color, (c) => this.set({ color: c }, true)),
+        selectField('Material', e.look, LOOKS, (v) => this.set({ look: v }, true)),
+        selectField('Pattern', e.pattern, PATTERNS, (v) => this.set({ pattern: v }, true)),
+        checkField('Visible while playing', e.visible, (v) => this.set({ visible: v }, true)));
 
-    const extras = def.props ? section('Extras', ...Object.entries(def.props).map(([k, p]) => (p.type === 'number'
-      ? numberField(p.label, e.props[k], (v) => this.set({ props: { ...e.props, [k]: v } }, true), p)
-      : textField(p.label, e.props[k], (v) => this.set({ props: { ...e.props, [k]: v } }, true))))) : null;
+    const setProp = (k, v) => this.set({ props: { ...e.props, [k]: v } }, true);
+    let extras = null;
+    if (isModel) {
+      const assets = [...ed.assets.values()];
+      const asset = ed.assets.get(e.props.asset);
+      const animOptions = { '': asset?.animations?.length ? 'First animation' : 'No animations in this model', none: 'Do not animate', ...Object.fromEntries((asset?.animations || []).map((n) => [n, n])) };
+      extras = section('3D model',
+        selectField('Model', e.props.asset, Object.fromEntries([['', 'Pick a model'], ...assets.map((a) => [a.id, a.name])]), (v) => setProp('asset', v)),
+        selectField('Collision shape', e.props.collider, { box: 'Box around it (fast)', hull: 'Wrapped shape (good for rocks)', mesh: 'Exact shape (for level geometry)', none: 'None, walk through it' }, (v) => setProp('collider', v),
+          { hint: 'Exact shape only works for objects that stay in place.' }),
+        selectField('Animation', e.props.animation || '', animOptions, (v) => setProp('animation', v)),
+        asset ? h('p', { class: 'field-hint' }, `${(asset.bytes / 1048576).toFixed(1)} MB${asset.animations.length ? ` · ${asset.animations.length} animation${asset.animations.length === 1 ? '' : 's'}` : ''}`) : null);
+    } else if (def.props) {
+      extras = section('Extras', ...Object.entries(def.props).map(([k, p]) => (p.type === 'number'
+        ? numberField(p.label, e.props[k], (v) => setProp(k, v), p)
+        : p.type === 'select' ? selectField(p.label, e.props[k], Object.fromEntries(p.options.map((o) => [o, o])), (v) => setProp(k, v))
+          : textField(p.label, e.props[k], (v) => setProp(k, v)))));
+    }
 
     const physicsFields = [selectField('How solid is it?', e.physics, PHYSICS, (v) => this.set({ physics: v }, true))];
     if (e.physics === 'dynamic') {
@@ -199,7 +236,7 @@ export class Inspector {
     const behaviorList = h('div', { class: 'behavior-list' }, e.behaviors.map((b, i) => this.behaviorCard(e, b, i)));
     const picker = h('select', { class: 'input', 'aria-label': 'Add a behavior' },
       h('option', { value: '' }, 'Add a behavior...'),
-      ...['Movement', 'Game rules', 'Advanced'].map((g) => h('optgroup', { label: g },
+      ...['Movement', 'Game rules', 'Combat', 'Driving', 'Advanced'].map((g) => h('optgroup', { label: g },
         BEHAVIOR_KEYS.filter((k) => BEHAVIORS[k].group === g).map((k) => h('option', { value: k }, `${BEHAVIORS[k].label}: ${BEHAVIORS[k].desc}`)))));
     picker.addEventListener('change', () => {
       const type = picker.value;
@@ -327,6 +364,8 @@ export class Inspector {
     const rules = section('Game rules',
       selectField('Camera', s.camera, CAMERAS, (v) => setRule({ camera: v }, true)),
       selectField('How to win', s.winCondition, WIN_CONDITIONS, (v) => setRule({ winCondition: v }, true)),
+      selectField('Player weapon', s.weapon, Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.label])), (v) => setRule({ weapon: v }, true),
+        { hint: s.weapon !== 'none' ? 'Shoot with the left mouse button or K. Give things "Can be destroyed" so they can be shot.' : '' }),
       s.winCondition === 'score' ? numberField('Points needed', s.targetScore, (v) => setRule({ targetScore: v }), { min: 1, step: 1 }) : null,
       numberField('Lives (0 = unlimited)', s.lives, (v) => setRule({ lives: v }), { min: 0, max: 99, step: 1 }),
       numberField('Time limit in seconds (0 = none)', s.timeLimit, (v) => setRule({ timeLimit: v }), { min: 0, max: 3600, step: 5 }),

@@ -29,6 +29,21 @@ function tone(freq, start, dur, { type = 'square', vol = 0.12, slide = 0 } = {})
   osc.stop(t + dur + 0.02);
 }
 
+function noise(dur, vol) {
+  const a = audio();
+  if (!a) return;
+  const len = Math.floor(a.sampleRate * dur);
+  const buf = a.createBuffer(1, len, a.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 2;
+  const src = a.createBufferSource();
+  const gain = a.createGain();
+  gain.gain.value = vol;
+  src.buffer = buf;
+  src.connect(gain).connect(a.destination);
+  src.start();
+}
+
 const SOUNDS = {
   coin: () => { tone(988, 0, 0.08); tone(1319, 0.07, 0.18); },
   jump: () => tone(320, 0, 0.18, { type: 'triangle', vol: 0.15, slide: 380 }),
@@ -41,6 +56,11 @@ const SOUNDS = {
   teleport: () => tone(300, 0, 0.35, { type: 'sine', vol: 0.18, slide: 1200 }),
   click: () => tone(660, 0, 0.05, { type: 'sine', vol: 0.06 }),
   pop: () => tone(500, 0, 0.08, { type: 'sine', vol: 0.1, slide: -200 }),
+  shoot: () => tone(880, 0, 0.09, { type: 'square', vol: 0.07, slide: -500 }),
+  zap: () => tone(520, 0, 0.12, { type: 'sawtooth', vol: 0.05, slide: -300 }),
+  hit: () => tone(260, 0, 0.06, { type: 'square', vol: 0.08, slide: -80 }),
+  explode: () => { noise(0.45, 0.25); tone(90, 0, 0.4, { type: 'sawtooth', vol: 0.12, slide: -60 }); },
+  car: () => tone(180, 0, 0.25, { type: 'sawtooth', vol: 0.06, slide: 120 }),
 };
 
 export function playSound(name) {

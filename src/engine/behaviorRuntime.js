@@ -152,6 +152,40 @@ export const RUNTIME = {
     };
   },
 
+  health(rt, p) {
+    rt.hp = p.hp;
+    rt.maxHp = p.hp;
+    rt.healthParams = p;
+    return {};
+  },
+
+  shooter(rt, p, game) {
+    let timer = p.every * (0.4 + Math.random() * 0.6);
+    const baseQuat = rt.obj.quaternion.clone();
+    return {
+      update(h) {
+        if (game.state !== 'playing' || !rt.alive || !game.combat) return;
+        const target = game.playerPosition.clone();
+        target.y += game.driving ? 0.4 : 0.15;
+        const from = rt.obj.position;
+        if (from.distanceTo(target) > p.range) return;
+        const yaw = Math.atan2(target.x - from.x, target.z - from.z);
+        if (rt.moving) rt.faceYaw = yaw;
+        else rt.obj.quaternion.setFromAxisAngle(AXES.y, yaw).multiply(baseQuat);
+        timer -= h;
+        if (timer > 0) return;
+        timer = p.every;
+        game.combat.fireEnemy(rt, target, p);
+      },
+    };
+  },
+
+  vehicle(rt, p, game) {
+    rt.vehicleParams = p;
+    game.addVehicle(rt, p);
+    return {};
+  },
+
   spawner(rt, p, game) {
     let timer = p.every * 0.5;
     const spawned = [];

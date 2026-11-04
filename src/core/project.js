@@ -51,7 +51,16 @@ export const WIN_CONDITIONS = {
   'collect-all': 'Collect everything',
   score: 'Reach a target score',
   survive: 'Survive until the timer ends',
+  'defeat-all': 'Defeat every enemy',
   none: 'No winning, just play',
+};
+
+/** What the player can shoot. "none" turns shooting off. */
+export const WEAPONS = {
+  none: { label: 'No weapon' },
+  blaster: { label: 'Blaster (balanced)', rate: 4, speed: 45, damage: 1, radius: 0.12, color: '#ffd23f', knock: 4, spread: 0 },
+  rapid: { label: 'Rapid fire (fast, weak)', rate: 10, speed: 60, damage: 0.5, radius: 0.08, color: '#7cf3ff', knock: 2, spread: 0.035 },
+  cannon: { label: 'Cannon (slow, strong)', rate: 1.2, speed: 32, damage: 3, radius: 0.28, color: '#ff8a3d', knock: 18, spread: 0 },
 };
 
 export const DEFAULT_SETTINGS = {
@@ -66,6 +75,7 @@ export const DEFAULT_SETTINGS = {
   playerColor: '#4fb3ff',
   fallLimit: -25,
   startMessage: '',
+  weapon: 'none',
 };
 
 const SETTING_LIMITS = {
@@ -133,7 +143,9 @@ export function normalizeEntity(raw) {
   if (shapeDef.props) {
     for (const [k, p] of Object.entries(shapeDef.props)) {
       const v = e.props?.[k];
-      props[k] = p.type === 'number' ? toNumber(v, p.default, p.min ?? -1e6, p.max ?? 1e6) : v == null ? p.default : String(v).slice(0, 200);
+      if (p.type === 'number') props[k] = toNumber(v, p.default, p.min ?? -1e6, p.max ?? 1e6);
+      else if (p.type === 'select') props[k] = p.options.includes(v) ? v : p.default;
+      else props[k] = v == null ? p.default : String(v).slice(0, 200);
     }
   }
   const behaviors = (Array.isArray(e.behaviors) ? e.behaviors : [])
@@ -172,6 +184,7 @@ export function normalizeSettings(raw = {}) {
     else if (k === 'winCondition') s[k] = WIN_CONDITIONS[v] ? v : DEFAULT_SETTINGS.winCondition;
     else if (k === 'playerColor') s[k] = parseColor(v, DEFAULT_SETTINGS.playerColor);
     else if (k === 'startMessage') s[k] = typeof v === 'string' ? v.slice(0, 300) : '';
+    else if (k === 'weapon') s[k] = WEAPONS[v] ? v : 'none';
   }
   return s;
 }
@@ -219,6 +232,22 @@ export function normalizeLevel(raw, index = 0) {
   };
 }
 
+/** Imported files (3D models). The data is a base64 data URL so projects stay one file. */
+export const MAX_ASSET_BYTES = 60 * 1024 * 1024;
+export function normalizeAsset(raw) {
+  const a = raw && typeof raw === 'object' ? raw : null;
+  if (!a || typeof a.data !== 'string' || !a.data.startsWith('data:') || a.data.length > MAX_ASSET_BYTES * 1.4) return null;
+  return {
+    id: typeof a.id === 'string' && /^[\w-]{1,64}$/.test(a.id) ? a.id : newId('asset'),
+    name: (typeof a.name === 'string' && a.name.trim() ? a.name.trim() : 'Model').slice(0, 60),
+    kind: 'model',
+    data: a.data,
+    bytes: toNumber(a.bytes, Math.round(a.data.length * 0.75), 0, MAX_ASSET_BYTES * 2),
+    thumb: typeof a.thumb === 'string' && a.thumb.startsWith('data:image/') && a.thumb.length < 200000 ? a.thumb : '',
+    animations: Array.isArray(a.animations) ? a.animations.map((n) => String(n).slice(0, 60)).slice(0, 50) : [],
+  };
+}
+
 export function normalizePrefab(raw) {
   const p = raw && typeof raw === 'object' ? raw : {};
   return {
@@ -253,6 +282,7 @@ export function normalizeProject(raw) {
     levels,
     gameScript: normalizeCode(p.gameScript),
     prefabs: (Array.isArray(p.prefabs) ? p.prefabs : []).slice(0, 200).map(normalizePrefab),
+    assets: (Array.isArray(p.assets) ? p.assets : []).slice(0, 200).map(normalizeAsset).filter(Boolean),
   };
 }
 

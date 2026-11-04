@@ -346,6 +346,82 @@ export const SHAPES = {
       ];
     },
   },
+  target: {
+    label: 'Target', size: [1.2, 1.9, 0.3],
+    build: ({ mat }) => {
+      const parts = [
+        part(new THREE.CylinderGeometry(0.05, 0.05, 1.2, 10), mat(WOOD), { pos: [0, -0.35, -0.05], collider: 'box' }),
+        part(new THREE.CylinderGeometry(0.35, 0.4, 0.08, 20), mat(DARK), { pos: [0, -0.92, -0.05] }),
+      ];
+      const rings = [[0.6, '#ffffff'], [0.47, null], [0.34, '#ffffff'], [0.21, null], [0.09, '#ffffff']];
+      rings.forEach(([r, color], i) => {
+        const g = new THREE.CylinderGeometry(r, r, 0.08, 40);
+        g.rotateX(PI / 2);
+        parts.push(part(g, color ? mat({ color, look: 'matte' }) : mat(), { pos: [0, 0.35, 0.02 + i * 0.012], collider: i === 0 ? 'cylinder' : null }));
+      });
+      return parts;
+    },
+  },
+  turret: {
+    label: 'Turret', size: [1.2, 1.3, 1.5],
+    build: ({ mat }) => {
+      const barrel = new THREE.CylinderGeometry(0.09, 0.11, 0.8, 14);
+      barrel.rotateX(PI / 2);
+      return [
+        part(new THREE.CylinderGeometry(0.5, 0.6, 0.45, 20), mat(DARK), { pos: [0, -0.42, 0], collider: 'cylinder' }),
+        part(new THREE.SphereGeometry(0.42, 24, 16), mat(), { pos: [0, 0.12, 0], collider: 'sphere' }),
+        part(barrel, mat(METAL_GREY), { pos: [0, 0.16, 0.5] }),
+        part(new THREE.SphereGeometry(0.11, 12, 10), mat({ color: '#ff5252', look: 'glow' }), { pos: [0, 0.3, 0.3] }),
+      ];
+    },
+  },
+  car: {
+    label: 'Car', size: [1.96, 1.5, 3.7],
+    build: ({ mat }) => {
+      const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 24);
+      wheelGeo.rotateZ(PI / 2);
+      const hub = new THREE.CylinderGeometry(0.2, 0.2, 0.34, 12);
+      hub.rotateZ(PI / 2);
+      const chassis = part(new THREE.BoxGeometry(1.8, 0.55, 3.6), mat(), { pos: [0, 0.73, 0], collider: 'box' });
+      chassis.userData.part = 'chassis';
+      const parts = [
+        chassis,
+        part(new THREE.BoxGeometry(1.55, 0.5, 1.9), mat({ color: '#1d2433', look: 'shiny' }), { pos: [0, 1.25, -0.25] }),
+        part(new THREE.BoxGeometry(1.5, 0.06, 0.4), mat({ dim: 0.7 }), { pos: [0, 1.03, 1.55] }),
+        part(new THREE.BoxGeometry(0.34, 0.14, 0.05), mat({ color: '#fff6c8', look: 'glow' }), { pos: [-0.6, 0.78, 1.81] }),
+        part(new THREE.BoxGeometry(0.34, 0.14, 0.05), mat({ color: '#fff6c8', look: 'glow' }), { pos: [0.6, 0.78, 1.81] }),
+        part(new THREE.BoxGeometry(0.34, 0.12, 0.05), mat({ color: '#ff3b3b', look: 'glow' }), { pos: [-0.6, 0.8, -1.81] }),
+        part(new THREE.BoxGeometry(0.34, 0.12, 0.05), mat({ color: '#ff3b3b', look: 'glow' }), { pos: [0.6, 0.8, -1.81] }),
+      ];
+      // Wheels: front left, front right, rear left, rear right (+z is the front).
+      [[-0.82, 1.15], [0.82, 1.15], [-0.82, -1.15], [0.82, -1.15]].forEach(([x, z], i) => {
+        const wheel = new THREE.Group();
+        wheel.position.set(x, 0.42, z);
+        wheel.userData.wheel = i;
+        const tire = part(wheelGeo, mat({ color: '#1b1b1f', look: 'matte' }));
+        const cap = part(hub, mat(METAL_GREY));
+        wheel.add(tire, cap);
+        parts.push(wheel);
+      });
+      return parts;
+    },
+  },
+  model: {
+    label: '3D model', size: [1, 1, 1], imported: true,
+    props: {
+      asset: { type: 'text', label: 'Model', default: '' },
+      collider: { type: 'select', label: 'Collision shape', options: ['box', 'hull', 'mesh', 'none'], default: 'box' },
+      animation: { type: 'text', label: 'Animation (empty = first one, "none" = still)', default: '' },
+    },
+    build: ({ mat, entity, buildModel }) => {
+      const parts = buildModel?.(entity);
+      if (parts) return parts;
+      // Shown until the model has loaded (or if its file is missing).
+      const box = part(new THREE.BoxGeometry(1, 1, 1), mat({ color: '#8f8aa3', look: 'glass' }), { collider: 'box', shadow: false });
+      box.userData.pendingModel = entity?.props?.asset || '';
+      return [box];
+    },
+  },
   sign: {
     label: 'Sign', size: [1.3, 1.5, 0.12],
     props: { text: { type: 'text', label: 'Sign text', default: 'Hello!' } },

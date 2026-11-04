@@ -17,12 +17,15 @@ import { checkField, numberField, rangeField, selectField, textField, colorField
 import { autosave, buildStandaloneHtml, canPublish, fileNameFor, loadAutosave, parseProjectFile, projectToFile } from './editor/storage.js';
 import { Game } from './engine/Game.js';
 import { isMuted, setMuted } from './engine/audio.js';
-import { CAMERAS, WIN_CONDITIONS, hasScripts, normalizeProject, stripScripts } from './core/project.js';
+import { CAMERAS, WEAPONS, WIN_CONDITIONS, hasScripts, normalizeProject, stripScripts } from './core/project.js';
 import { buildTemplate, TEMPLATES } from './templates.js';
 import { clear, confirmDialog, download, h, icon, openDialog, pickFile, toast } from './ui/dom.js';
 import { debounce, safeStorage } from './core/util.js';
 import { logger } from './core/log.js';
 import { desktop, isDesktop } from './platform.js';
+import { ensureModel } from './engine/models.js';
+import { readModelFile } from './editor/modelImport.js';
+import { loadAssets, storeAssets } from './editor/assetStore.js';
 
 const storage = safeStorage();
 const pref = {
@@ -101,6 +104,8 @@ class App {
     this.root.append(this.viewport);
     const project = normalizeProject(window.__XORDOR_GAME__);
     document.title = project.name;
+    const loading = h('div', { class: 'fatal' }, h('p', {}, 'Loading...'));
+    if (project.assets.length) this.viewport.append(loading);
     const start = (levelId = project.startLevel, carry = null) => {
       this.game?.dispose();
       this.game = new Game({ container: this.viewport, canvas: this.canvas, project, levelId, carry, playOnly: true });
@@ -108,7 +113,7 @@ class App {
       this.game.onNextLevel = (next, c) => { start(next, c); this.game.begin(); };
       this.resize();
     };
-    start();
+    Promise.allSettled(project.assets.map(ensureModel)).then(() => { loading.remove(); start(); });
   }
 
   // ------------------------------------------------------------ editor
@@ -132,14 +137,20 @@ class App {
     this.buildProLayout();
 
     const save = debounce(() => {
-      autosave(ed.doc, { filePath: this.filePath, levelId: ed.levelId });
+      autosave(ed.doc, { filePath: this.filePath, levelId: ed.levelId, assetIds: [...ed.assets.keys()] });
       if (!isDesktop) this.setSaveState('Saved in this app');
     }, 700);
     ed.on('change', ({ source }) => {
       this.updateChrome();
       if (source !== 'load') save();
     });
+    window.addEventListener('pagehide', () => save.flush());
     ed.on('level', () => this.updateChrome());
+    ed.on('assets', () => {
+      storeAssets([...ed.assets.values()]);
+      save();
+      this.updateChrome();
+    });
     ed.on('saved', () => this.updateChrome());
     ed.on('tool', () => this.updateTools());
     ed.on('select', (id) => {
@@ -156,6 +167,14 @@ class App {
       this.filePath = saved.filePath || null;
       ed.load(saved.project, { levelId: saved.levelId });
       if (isDesktop && saved.filePath) ed.markSaved();
+      if (saved.assetIds.length) {
+        loadAssets(saved.assetIds).then((list) => {
+          const wasDirty = ed.dirty;
+          for (const a of list) ed.addAsset(a);
+          ed.dirty = wasDirty;
+          this.updateChrome();
+        });
+      }
     } else {
       ed.load(buildTemplate('coins'));
     }
@@ -347,7 +366,7 @@ class App {
     const mobileTab = (tab, ic, label) => h('button', { type: 'button', class: 'mtab', dataset: { tab }, onclick: () => this.setMobileTab(tab) }, icon(ic), h('span', {}, label));
     const mobileBar = h('nav', { class: 'mobile-tabs', 'aria-label': 'Panels' },
       mobileTab('add', 'plus', 'Add'), mobileTab('objects', 'list', 'Objects'), mobileTab('props', 'sliders', 'Edit'), mobileTab('ai', 'sparkle', 'AI'));
-    this.addPanel = new AddPanel(addRoot, ed);
+    this.addPanel = new AddPanel(addRoot, ed, { onImportModel: () => this.importModel() });
     this.objectsPanel = new ObjectsPanel(objectsRoot, ed);
     this.simpleParts = [topbar, left, 'viewport', this.simpleRight, this.simpleAI, mobileBar];
   }
@@ -374,7 +393,7 @@ class App {
       this.modeToggle());
 
     const placeRoot = h('div', { class: 'panel-body compact-tiles' });
-    this.placePanel = new AddPanel(placeRoot, ed);
+    this.placePanel = new AddPanel(placeRoot, ed, { onImportModel: () => this.importModel() });
     const place = h('aside', { class: 'pro-panel pro-place', 'aria-label': 'Place actors' }, h('div', { class: 'pro-head' }, icon('plus'), 'Place Actors'), placeRoot);
 
     const outlinerRoot = h('div', { class: 'outliner' });
@@ -390,7 +409,7 @@ class App {
     const codeRoot = h('div', { class: 'dock-pane code-pane' });
     this.proAI = h('div', { class: 'dock-pane ai-pane' });
     this.dockPanes = { content: contentRoot, log: logRoot, code: codeRoot, ai: this.proAI };
-    this.contentBrowser = new ContentBrowser(contentRoot, ed, { onOpenCode: (t) => this.openCode(t) });
+    this.contentBrowser = new ContentBrowser(contentRoot, ed, { onOpenCode: (t) => this.openCode(t), onImportModel: () => this.importModel() });
     this.outputLog = new OutputLog(logRoot);
     this.codePanel = new CodePanel(codeRoot, ed, { onAskAI: (text) => this.openAI(text) });
     this.dockTabs = h('div', { class: 'dock-tabs', role: 'tablist' });
@@ -511,6 +530,7 @@ class App {
       case 'save': return this.save();
       case 'save-as': return this.save({ as: true });
       case 'export': return this.publish();
+      case 'import-model': return this.importModel();
       case 'undo': if (typing) document.execCommand('undo'); else if (!this.game) ed.undo(); return null;
       case 'redo': if (typing) document.execCommand('redo'); else if (!this.game) ed.redo(); return null;
       case 'duplicate': if (!typing && !this.game) ed.duplicateSelected(); return null;
@@ -577,10 +597,16 @@ class App {
   }
 
   // ---------- play mode ----------
-  play({ fromCamera = false } = {}) {
-    if (this.game) return;
+  async play({ fromCamera = false } = {}) {
+    if (this.game || this.starting) return;
     const ed = this.editor;
     this.codePanel?.flush();
+    if (ed.assets.size) {
+      this.starting = true;
+      await Promise.allSettled([...ed.assets.values()].map(ensureModel));
+      this.starting = false;
+      if (this.game) return;
+    }
     this.root.classList.add('playing');
     ed.setActive(false);
     const spawnAt = fromCamera ? ed.cameraSpawn() : null;
@@ -614,7 +640,24 @@ class App {
 
   // ---------- files ----------
   projectText() {
-    return projectToFile(this.editor.doc);
+    return projectToFile(this.editor.fullDoc());
+  }
+
+  async importModel() {
+    const file = await pickFile('.glb,.gltf,model/gltf-binary,model/gltf+json');
+    if (!file) return;
+    toast(`Reading ${file.name}...`, { ms: 1500 });
+    try {
+      const { asset, info } = await readModelFile(file);
+      this.editor.addAsset(asset);
+      this.editor.placeModel(asset.id);
+      const anims = info.animations.length ? `, ${info.animations.length} animation${info.animations.length === 1 ? '' : 's'}` : '';
+      toast(`Added "${asset.name}" (${info.triangles.toLocaleString()} triangles${anims})`);
+      logger.success('editor', `Imported ${file.name}: ${(asset.bytes / 1048576).toFixed(1)} MB, ${info.triangles} triangles${anims}.`);
+    } catch (err) {
+      toast(`Couldn't import that model. ${err.message}`, { kind: 'error', ms: 7000 });
+      logger.error('editor', `Import failed for ${file.name}: ${err.message}`);
+    }
   }
 
   async confirmDiscard() {
@@ -634,7 +677,8 @@ class App {
     this.editor.load(project);
     if (filePath) this.editor.markSaved();
     this.editor.focusSelected();
-    autosave(this.editor.doc, { filePath, levelId: this.editor.levelId });
+    autosave(this.editor.doc, { filePath, levelId: this.editor.levelId, assetIds: [...this.editor.assets.keys()] });
+    storeAssets([...this.editor.assets.values()]);
     this.updateChrome();
     logger.info('editor', `Opened "${project.name}"${filePath ? ` from ${filePath}` : ''}.`);
   }
@@ -682,7 +726,7 @@ class App {
         if (!path) return false;
         this.filePath = path;
         this.editor.markSaved();
-        autosave(p, { filePath: path, levelId: this.editor.levelId });
+        autosave(this.editor.doc, { filePath: path, levelId: this.editor.levelId, assetIds: [...this.editor.assets.keys()] });
         toast(`Saved ${path.split(/[\\/]/).pop()}`);
         logger.success('editor', `Saved to ${path}`);
         return true;
@@ -722,7 +766,7 @@ class App {
         { label: 'Cancel', value: null },
         {
           label: 'Export game', primary: true, run: async () => {
-            const html = buildStandaloneHtml(p);
+            const html = buildStandaloneHtml(this.editor.fullDoc());
             if (!html) { toast('Exporting is not available here.', { kind: 'error' }); return false; }
             if (isDesktop) {
               const path = await desktop.project.exportGame(html, p.name);
@@ -802,6 +846,7 @@ class App {
           h('div', { class: 'field' }, h('label', { class: 'field-label', for: 'start-level' }, 'Play starts at level'), startSel),
           selectField('Camera', s.camera, CAMERAS, (v) => set({ camera: v })),
           selectField('How to win a level', s.winCondition, WIN_CONDITIONS, (v) => set({ winCondition: v })),
+          selectField('Player weapon', s.weapon, Object.fromEntries(Object.entries(WEAPONS).map(([k, w]) => [k, w.label])), (v) => set({ weapon: v })),
           numberField('Points needed (score rule)', s.targetScore, (v) => set({ targetScore: v }), { min: 1, step: 1 }),
           numberField('Lives (0 = unlimited)', s.lives, (v) => set({ lives: v }), { min: 0, max: 99, step: 1 }),
           numberField('Time limit per level, seconds (0 = none)', s.timeLimit, (v) => set({ timeLimit: v }), { min: 0, step: 5 }),

@@ -7,9 +7,10 @@ import { safeStorage } from '../core/util.js';
 const AUTOSAVE_KEY = 'xordor.autosave.v2';
 const storage = safeStorage();
 
-export function autosave(project, { filePath = null, levelId = null } = {}) {
+export function autosave(project, { filePath = null, levelId = null, assetIds = [] } = {}) {
   try {
-    storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), project, filePath, levelId }));
+    const { assets, ...rest } = project;
+    storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), project: rest, filePath, levelId, assetIds }));
     return true;
   } catch {
     return false;
@@ -21,7 +22,7 @@ export function loadAutosave() {
     const raw = storage.getItem(AUTOSAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    return data?.project ? { project: normalizeProject(data.project), savedAt: data.savedAt, filePath: data.filePath || null, levelId: data.levelId || null } : null;
+    return data?.project ? { project: normalizeProject(data.project), savedAt: data.savedAt, filePath: data.filePath || null, levelId: data.levelId || null, assetIds: Array.isArray(data.assetIds) ? data.assetIds : [] } : null;
   } catch {
     return null;
   }

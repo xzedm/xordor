@@ -169,3 +169,38 @@ describe('built-in helper counting', () => {
     expect(offlineAssistant('add a coin').actions[0].do).toBe('add');
   });
 });
+
+describe('shooting, driving and models', () => {
+  it('the built-in helper hands out weapons and builds races', () => {
+    const p = applyActions(base(), offlineAssistant('give me a gun').actions).project;
+    expect(p.settings.weapon).toBe('blaster');
+    expect(applyActions(base(), offlineAssistant('machine gun please').actions).project.settings.weapon).toBe('rapid');
+    const race = applyActions(base(), offlineAssistant('make a race track').actions).project;
+    const car = race.objects.find((o) => o.shape === 'car');
+    expect(car.behaviors.find((b) => b.type === 'vehicle').params.startInside).toBe(true);
+    expect(race.objects.some((o) => o.behaviors.some((b) => b.type === 'goal'))).toBe(true);
+  });
+  it('adds cars, turrets and targets with their rules', () => {
+    const p = applyActions(base(), [{ do: 'add', object: { prefab: 'turret' } }, { do: 'add', object: { shape: 'car' } }, { do: 'add', object: { prefab: 'target' } }]).project;
+    const types = (shape) => p.objects.find((o) => o.shape === shape).behaviors.map((b) => b.type);
+    expect(types('turret')).toEqual(['shooter', 'health']);
+    expect(types('car')).toEqual(['vehicle']);
+    expect(types('target')).toEqual(['health']);
+  });
+  it('places imported models by id', () => {
+    const p = applyActions(base(), [{ do: 'add', object: { shape: 'model', props: { asset: 'asset_abc', collider: 'hull', animation: 'Wave' }, scale: 2 } }]).project;
+    const m = p.objects.at(-1);
+    expect(m.props).toEqual({ asset: 'asset_abc', collider: 'hull', animation: 'Wave' });
+    const bad = applyActions(base(), [{ do: 'add', object: { shape: 'model', props: { collider: 'banana' } } }]).project.objects.at(-1);
+    expect(bad.props.collider).toBe('box');
+  });
+  it('the prompt mentions weapons, vehicles and models', () => {
+    const sys = systemPrompt();
+    expect(sys).toContain('defeat-all');
+    expect(sys).toContain('startInside');
+    expect(sys).toContain('"shape": "model"');
+    const v = base();
+    v.models = [{ id: 'asset_1', name: 'Robot', animations: ['Wave'] }];
+    expect(worldSnapshot(v, null)).toContain('"Robot"');
+  });
+});

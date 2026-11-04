@@ -1,7 +1,7 @@
 // Starter games. Each one is built from the same actions the AI helper uses.
 import { createProject, levelView, mergeLevelView } from './core/project.js';
 import { applyActions } from './ai/actions.js';
-import { offlineAssistant } from './ai/offline.js';
+import { offlineAssistant, raceTrack } from './ai/offline.js';
 
 export const TEMPLATES = [
   { key: 'empty', label: 'Empty world', blurb: 'A blank grassy field. Build anything.' },
@@ -10,6 +10,8 @@ export const TEMPLATES = [
   { key: 'arena', label: 'Enemy arena', blurb: 'Dodge the chasers and survive for 60 seconds.' },
   { key: 'playground', label: 'Physics playground', blurb: 'Knock over towers of crates and bounce balls.' },
   { key: 'maze', label: 'Maze escape', blurb: 'Find the way out of a brick maze.' },
+  { key: 'robots', label: 'Robot attack', blurb: 'Blast every robot and turret before they get you.' },
+  { key: 'race', label: 'Desert rally', blurb: 'Drive through the checkpoints to the finish against the clock.' },
 ];
 
 const recipes = {
@@ -71,6 +73,21 @@ const recipes = {
     { do: 'add', object: { prefab: 'ramp', position: [0, 0.75, 6], rotation: [0, 180, 0] } },
     { do: 'add', object: { prefab: 'dropper', position: [8, 8, 0], behaviors: [{ type: 'spawner', params: { every: 1, harmful: false, color: '#7c4dff' } }] } },
     { do: 'add', object: { prefab: 'speedpad', position: [0, 0.04, 2] } },
+  ],
+  robots: () => [
+    { do: 'rename', name: 'Robot Attack' },
+    { do: 'environment', set: { preset: 'lava' } },
+    { do: 'settings', set: { weapon: 'blaster', winCondition: 'defeat-all', lives: 5, startMessage: 'Destroy every robot and turret! Shoot with the left mouse button or K.' } },
+    { do: 'addMany', object: { prefab: 'wall', scale: [4, 1.6, 0.6], color: '#5c4a44', pattern: 'stone' }, count: 6, layout: 'circle', radius: 9, center: [0, 0.8, -6], faceCenter: true },
+    { do: 'addMany', object: { prefab: 'enemy', color: '#ff5a36', behaviors: [{ type: 'chase', params: { speed: 2.4, range: 30 } }] }, count: 5, layout: 'circle', radius: 18, center: [0, 0.65, -10] },
+    { do: 'addMany', object: { prefab: 'turret' }, count: 3, layout: 'line', center: [0, 0.65, -30], spacing: 12 },
+    { do: 'addMany', object: { prefab: 'crate' }, count: 8, layout: 'random', center: [0, 0.5, -12], area: [24, 0, 18], seed: 21 },
+    { do: 'addMany', object: { prefab: 'heart' }, count: 2, layout: 'line', center: [0, 0.6, -18], spacing: 10 },
+    { do: 'addMany', object: { prefab: 'lamp', color: '#ff9c5a' }, count: 4, layout: 'circle', radius: 14, center: [0, 3, -10] },
+  ],
+  race: () => [
+    { do: 'rename', name: 'Desert Rally' },
+    ...raceTrack([0, 0, 0]),
   ],
   maze: () => [
     { do: 'rename', name: 'Maze Escape' },

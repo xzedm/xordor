@@ -4,7 +4,7 @@ import { describeShapes } from '../core/shapes.js';
 import { describeBehaviors } from '../core/behaviors.js';
 import { describePrefabs } from '../core/prefabs.js';
 import { ENV_PRESET_KEYS } from '../core/environment.js';
-import { CAMERAS, LOOKS, PATTERNS, PHYSICS, WIN_CONDITIONS } from '../core/project.js';
+import { CAMERAS, LOOKS, PATTERNS, PHYSICS, WEAPONS, WIN_CONDITIONS } from '../core/project.js';
 import { round } from '../core/util.js';
 
 let cachedSystem = null;
@@ -52,9 +52,14 @@ For "script" the code may define onStart(), onUpdate(dt) and onTouch(). Availabl
 - {"do": "delete", "id": "..."} (or "name", "shape", "target": "selected", "all": true)
 - {"do": "clear"} removes everything except the player start.
 - {"do": "environment", "set": {"preset": "${ENV_PRESET_KEYS.join('|')}", "skyTop": "#..", "skyBottom": "#..", "fog": 0..1, "fogColor": "#..", "sunColor": "#..", "sunIntensity": 0..6, "sunHeight": 2..90, "ambient": 0..3, "stars": true, "showGround": true, "groundColor": "#..", "groundPattern": "grass", "groundSize": 80}}
-- {"do": "settings", "set": {"camera": "${Object.keys(CAMERAS).join('|')}", "winCondition": "${Object.keys(WIN_CONDITIONS).join('|')}", "targetScore": 10, "lives": 3 (0 = unlimited), "timeLimit": seconds (0 = none), "playerSpeed": 7, "jumpPower": 9, "gravity": 22, "playerColor": "#..", "fallLimit": -25, "startMessage": "text shown before playing"}}
+- {"do": "settings", "set": {"camera": "${Object.keys(CAMERAS).join('|')}", "winCondition": "${Object.keys(WIN_CONDITIONS).join('|')}", "targetScore": 10, "lives": 3 (0 = unlimited), "timeLimit": seconds (0 = none), "playerSpeed": 7, "jumpPower": 9, "gravity": 22, "playerColor": "#..", "fallLimit": -25, "startMessage": "text shown before playing", "weapon": "${Object.keys(WEAPONS).join('|')}"}}
 - {"do": "rename", "name": "Game title"}
 - {"do": "gameScript", "code": "function onStart() { ... }\nfunction onUpdate(dt) { ... }"} replaces the project's game script, which runs in every level (no self).
+
+## Shooting, driving and imported models
+- Turn on shooting with settings weapon (blaster, rapid or cannon). The player shoots with the mouse or K. Only things with the "health" behavior can be destroyed; give enemies and targets "health" and use winCondition "defeat-all" for shooting games. "shooter" makes things fire back.
+- Cars: the "car" prefab (vehicle behavior). The player presses F to get in. Set the vehicle param startInside true for racing games. Give cars a big open ground (groundSize 200 or more), put checkpoints along the route and a finish flag (scale 3 so cars hit it easily).
+- Imported 3D models appear in the snapshot under "models". Place one with {"shape": "model", "props": {"asset": "<model id>", "collider": "box|hull|mesh|none", "animation": "<clip name>"}, "scale": 2}. A model's longest side is 1 m at scale 1.
 
 ## Levels
 A project can have several levels; you always edit the level named in the snapshot. Settings (rules, player, camera) are shared by all levels. Winning a level moves the player on to the next one.
@@ -102,6 +107,7 @@ export function worldSnapshot(project, selectedId, maxObjects = 350) {
     settings: project.settings,
     environment: { preset: project.environment.preset, showGround: project.environment.showGround, groundSize: project.environment.groundSize, groundColor: project.environment.groundColor },
     objectCount: objs.length,
+    models: project.models?.length ? project.models : undefined,
     objects: listed.map(compactEntity),
   };
   if (objs.length > maxObjects) {

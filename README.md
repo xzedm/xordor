@@ -15,6 +15,22 @@ Both modes include an **AI helper** that works with **ChatGPT, Claude, Gemini, O
 
 ---
 
+## What you can make
+
+| Game type | Built with |
+|---|---|
+| Platformers and obstacle courses | Moving, falling and spinning platforms, bounce pads, checkpoints, lava, spikes |
+| Collect-them-all and treasure hunts | Coins, stars, gems, keys and locked doors, timers |
+| Shooters and arena battles | Player weapons (blaster, rapid fire, cannon), targets, turrets and robots that shoot back, "defeat every enemy" rule |
+| Racing and driving games | Drivable cars with real suspension, checkpoints, finish line, timer |
+| Survival, mazes and exploration | Chasing enemies, ball droppers, portals, signs, first-person or top-down cameras |
+| Physics playgrounds | Crates, barrels, bouncy balls, ramps (and you can shoot them around) |
+| Anything with your own art | Import 3D models (`.glb` / `.gltf`) from Blender, Sketchfab, Mixamo and other tools, including their animations |
+
+Games can have several levels, and the starter templates include *Coin hunt*, *Sky parkour*, *Enemy arena*, *Physics playground*, *Maze escape*, *Robot attack* (shooter) and *Desert rally* (racing).
+
+---
+
 ## Install and run
 
 You need [Node.js](https://nodejs.org) (the "LTS" version) once, to set Xordor up.
@@ -49,9 +65,16 @@ The first time Xordor opens, it asks whether you want **Simple** or **Pro** mode
 | Change the sky, ground and rules | Click empty space so nothing is selected. **Properties** then shows the world settings and game rules. |
 | Add another level | Use the level menu in the top bar and choose **+ Add a level**. Winning a level moves on to the next one. |
 | Look around | Drag with the mouse. Right-drag to slide. Scroll to zoom. |
+| Give the player a weapon | Click empty space, then under **Game rules** pick a **Player weapon**. Give targets and enemies the **Can be destroyed** behavior. |
+| Add a car | Add **Car** from Game pieces. While playing, press **F** next to it to get in or out. |
+| Use your own 3D model | Press **Import 3D model** at the top of the Add panel and pick a `.glb` or `.gltf` file. |
 | Undo | **Ctrl+Z** (redo is **Ctrl+Y**). Every AI change can also be undone from its reply. |
 
 Press the green **Play** button to try your game: **W A S D** or the arrow keys move, **Space** jumps, **Shift** runs, drag the mouse to look, **P** pauses, **Esc** goes back to the editor.
+
+- **Shooting** (when the game has a weapon): click into the game, then move the mouse to aim and press the left mouse button (or **K**) to shoot.
+- **Driving:** **F** gets in or out of a car. **W / S** drive and reverse, **A / D** steer, **Space** brakes. A car that lands on its roof flips back over by itself.
+- On phones and tablets there are on-screen **Fire** and **Drive** buttons.
 
 ---
 
@@ -64,7 +87,7 @@ Pro mode lays the editor out the way big engines do:
 - **Outliner** (top right): every actor in the level, with folders, search, type column and visibility. Ctrl+click and Shift+click select several. Right-click for rename, duplicate, snap to floor, move to folder and save as prefab.
 - **Details** (bottom right): exact transform, rendering, physics, components, folder, tags, the actor's ID, and **Edit as JSON**.
 - **Bottom dock:**
-  - **Content Browser**: your **levels** (open, rename, duplicate, reorder, choose where play starts), **your own prefabs**, the built-in library, and every script in the project.
+  - **Content Browser**: your **levels** (open, rename, duplicate, reorder, choose where play starts), **your own prefabs**, imported **3D models**, the built-in library, and every script in the project.
   - **Output Log**: messages from your game, your scripts and the AI assistant, with filters. Script errors show the line number.
   - **Code**: a real code editor (syntax colors, auto-indent, error lines) for the **game script** and for **custom code components** on actors. **Reference** shows the whole scripting API.
   - **AI Assistant**: the same AI helper, docked.
@@ -72,6 +95,12 @@ Pro mode lays the editor out the way big engines do:
 **Camera like Unreal:** hold the **right mouse button** and use **W A S D** to fly, **Q / E** to go down / up, scroll to change speed. Left-drag orbits, middle-drag pans, **F** zooms to the selection, **End** drops it to the floor, **Space** cycles move / rotate / scale.
 
 **Playing in Pro mode** keeps the panels open, like "Play in Editor". **Play From Camera** (Alt+Shift+P) starts the player where the camera is. The **Pause** button (or **P**) freezes the game.
+
+### Shooting, vehicles and 3D models
+
+- **Weapons:** *Project Settings > Player weapon* (or *World Settings > Game rules*). Blaster is balanced, Rapid fire shoots fast and weak, Cannon is slow, strong and knocks things flying. Shots hit walls, push physics objects and damage anything with a **Can be destroyed** component (health, points, explode / pop / vanish). **Shoots at the player** makes turrets and enemies fire back. The **Defeat every enemy** win rule ends the level when everything destroyable is gone.
+- **Vehicles:** the **Drivable vehicle** component (on the built-in Car) uses cannon-es's raycast vehicle: four wheels with suspension, grip and a top speed. Tick *The player starts in this vehicle* for racing games.
+- **3D models:** **File > Import 3D Model** (Ctrl+I). Models are stored inside the project, so project files and exported games stay single files. Each placed model can use a box, a wrapped (convex) or an exact collision shape, and play any of its animations. Compressed (Draco / Meshopt) models and models with separate texture files are not supported yet; export a plain `.glb`.
 
 ### Scripting
 
@@ -88,6 +117,8 @@ function onUpdate(dt) {
   if (self.distanceToPlayer() < 3) game.message("Hello!");
 }
 ```
+
+Scripts can also read and change health (`self.health`, `self.damage(1)`) and check `player.driving`.
 
 The project's **game script** (Content Browser > Scripts) runs in every level and can define `onStart()` and `onUpdate(dt)`. Scripts can use `self`, `game`, `player`, `world`, `log()` and `THREE` (three.js). The full list is under **Code > Reference** and **Help > Script Reference**. The AI assistant can write scripts for you.
 
@@ -163,6 +194,9 @@ src/
   engine/          The runtime
     world.js         Project data to Three.js scene (shared by editor and game)
     physics.js       cannon-es bodies built from each shape's parts
+    models.js        Imported glTF models: decoding, caching, colliders, animations
+    combat.js        Weapons, bullets, damage, explosions
+    vehicles.js      Drivable cars (cannon-es RaycastVehicle)
     Game.js          Play mode: player, camera, rules, levels, scripts, HUD
     behaviorRuntime.js  What each behavior does while playing
   editor/          The editor
@@ -172,6 +206,8 @@ src/
     aiPanel.js       AI chat and AI settings
     codeEditor.js    CodeMirror setup
     storage.js       Recovery copy, project files, game export
+    modelImport.js   Reads .glb / .gltf files into project assets
+    assetStore.js    Keeps imported models in IndexedDB for crash recovery
   ai/              The AI layer
     providers.js     OpenAI-compatible, Anthropic (official SDK) and Gemini clients
     prompt.js        System prompt (generated from the catalogs) and level snapshot
@@ -182,7 +218,7 @@ src/
   templates.js     Starter games, built with the same actions the AI uses
 ```
 
-**Projects** hold game-wide settings, a game script, user prefabs and a list of levels. The editor, the AI and the game all work on a *level view* (the settings plus one level's sky and objects), and changes are merged back into the project as one undo step.
+**Projects** hold game-wide settings, a game script, user prefabs, imported models (as data URLs, kept out of the undo history) and a list of levels. The editor, the AI and the game all work on a *level view* (the settings plus one level's sky and objects), and changes are merged back into the project as one undo step.
 
 **The AI never touches the scene directly.** It returns JSON actions (`add`, `addMany`, `update`, `delete`, `environment`, `settings`, `gameScript`...). `applyActions()` validates them into a new level view, which the editor commits as a single undo step. The system prompt is generated from the shape, prefab and behavior catalogs, so adding a shape or behavior teaches the AI about it automatically.
 

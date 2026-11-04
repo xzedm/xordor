@@ -687,3 +687,30 @@ body.play-only .viewport { position: fixed; inset: 0; }
   .content-browser .cb-nav, .code-list { width: 150px; }
   .code-ref { width: 280px; }
 }
+
+/* ---------- combat and driving HUD ---------- */
+.hud-crosshair {
+  position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; transform: translate(-50%, -50%); pointer-events: none;
+  border-radius: 50%; border: 2px solid rgb(255 255 255 / 0.85); box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+}
+.hud-crosshair::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; transform: translate(-50%, -50%);
+  border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+.hud-hint {
+  position: absolute; left: 50%; bottom: max(28px, calc(env(safe-area-inset-bottom, 0px) + 28px)); transform: translateX(-50%);
+  padding: 8px 16px; border-radius: 999px; background: rgb(20 16 28 / 0.72); font: 600 1rem var(--font-display); white-space: nowrap;
+}
+.fire-btn, .use-btn {
+  position: absolute; border-radius: 50%; border: 2px solid rgb(255 255 255 / 0.5); pointer-events: auto; touch-action: none;
+  font: 600 0.95rem var(--font-display);
+}
+.fire-btn { right: max(124px, calc(env(safe-area-inset-right, 0px) + 124px)); bottom: max(46px, env(safe-area-inset-bottom, 0px)); width: 76px; height: 76px; background: rgb(255 77 77 / 0.85); color: #fff; }
+.use-btn { right: max(30px, env(safe-area-inset-right, 0px)); bottom: max(140px, calc(env(safe-area-inset-bottom, 0px) + 140px)); width: 70px; height: 70px; background: rgb(124 243 255 / 0.85); color: #06232a; }
+.add-top { display: grid; gap: 8px; }
+.import-btn { justify-content: center; border-style: dashed; }
+.tile-icon { display: grid; place-items: center; width: 56px; height: 56px; color: var(--muted); }
+.compact-tiles .tile-icon { width: 40px; height: 40px; }
+.asset-thumb .icon { width: 34px; height: 34px; color: var(--muted); }
+.art-robots { background: radial-gradient(circle at 30% 60%, #ff5a36 0 9px, transparent 10px), radial-gradient(circle at 55% 52%, #ff5a36 0 9px, transparent 10px), linear-gradient(#ffd23f, #ffd23f) 72% 58% / 26px 3px no-repeat, linear-gradient(180deg, #1a0b0b, #7a2a12 60%, #3b2b28 60%); }
+.art-race { background: linear-gradient(#e63946, #e63946) 44% 66% / 34px 14px no-repeat, linear-gradient(105deg, transparent 38%, #c9a86a 38% 62%, transparent 62%) 0 47px / 100% 31px no-repeat, linear-gradient(180deg, #4aa3df, #f6e3b4 60%, #e3c27f 60%); }
