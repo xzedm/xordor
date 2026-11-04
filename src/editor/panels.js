@@ -1,6 +1,6 @@
 // The editor's side panels: Add (the palette), Objects (the list) and
 // Properties (settings for the selected object, or the whole world).
-import { clear, h, icon } from '../ui/dom.js';
+import { clear, h, icon, openDialog, toast } from '../ui/dom.js';
 import { PREFAB_GROUPS } from '../core/prefabs.js';
 import { SHAPES } from '../core/shapes.js';
 import { BEHAVIORS, BEHAVIOR_KEYS, defaultParams } from '../core/behaviors.js';
@@ -67,19 +67,19 @@ export class ObjectsPanel {
 
   render() {
     const p = this.editor.project;
-    if (!p) return;
+    if (!p || !this.root.isConnected) return;
     const scroll = this.list.scrollTop;
     clear(this.list);
     const items = p.objects.filter((o) => !this.query || o.name.toLowerCase().includes(this.query) || o.shape.includes(this.query));
     this.count.textContent = `${p.objects.length} object${p.objects.length === 1 ? '' : 's'} in your world`;
     const shown = items.slice(0, 600);
     for (const o of shown) {
-      const selected = o.id === this.editor.selectedId;
+      const selected = this.editor.selection.includes(o.id);
       const li = h('li', { class: `object-row ${selected ? 'selected' : ''}`, role: 'option', 'aria-selected': selected ? 'true' : 'false' },
         h('span', { class: 'dot', style: { background: o.color } }),
         h('button', {
           type: 'button', class: 'object-name',
-          onclick: () => this.editor.select(o.id),
+          onclick: (ev) => this.editor.select(o.id, { toggle: ev.ctrlKey || ev.metaKey }),
           ondblclick: () => { this.editor.select(o.id); this.editor.focusSelected(); },
         }, o.name, h('span', { class: 'muted' }, ` ${SHAPES[o.shape]?.label || o.shape}`)),
         h('button', {
@@ -96,10 +96,13 @@ export class ObjectsPanel {
 
 // ---------------------------------------------------------------- Properties
 export class Inspector {
-  constructor(root, editor, { onAskAI } = {}) {
+  constructor(root, editor, { onAskAI, onOpenCode, onSavePrefab, pro = false } = {}) {
     this.root = root;
     this.editor = editor;
     this.onAskAI = onAskAI;
+    this.onOpenCode = onOpenCode;
+    this.onSavePrefab = onSavePrefab;
+    this.pro = pro;
     this.transformFields = {};
     editor.on('select', () => this.render());
     editor.on('change', ({ source }) => {
@@ -114,14 +117,37 @@ export class Inspector {
     });
   }
 
+  setPro(on) {
+    this.pro = on;
+    this.render();
+  }
+
   render() {
+    if (!this.root.isConnected) return;
     const scroll = this.root.scrollTop;
     clear(this.root);
     this.transformFields = {};
     const e = this.editor.selected;
+    if (this.editor.selection.length > 1) this.root.append(this.multiHeader());
     if (e) this.renderEntity(e);
     else if (this.editor.project) this.renderWorld(this.editor.project);
     this.root.scrollTop = scroll;
+  }
+
+  multiHeader() {
+    const ed = this.editor;
+    const n = ed.selection.length;
+    const folderInput = h('input', { type: 'text', class: 'input', placeholder: 'Folder name', 'aria-label': 'Move selected objects to folder' });
+    return h('div', { class: 'multi-head' },
+      h('strong', {}, `${n} objects selected`),
+      h('p', { class: 'muted small' }, 'Moving with the arrows moves all of them. The settings below are for the last one you picked.'),
+      h('div', { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn btn-small', onclick: () => ed.duplicateSelected() }, icon('copy'), 'Duplicate all'),
+        h('button', { type: 'button', class: 'btn btn-small', onclick: () => ed.deleteSelected() }, icon('trash'), 'Delete all'),
+        h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.onSavePrefab?.() }, icon('cube'), 'Save as prefab')),
+      this.pro ? h('div', { class: 'inline' }, folderInput, h('button', {
+        type: 'button', class: 'btn btn-small', onclick: () => ed.updateEntities(ed.selection, () => ({ folder: folderInput.value }), 'inspector', 'Move to folder'),
+      }, 'Move')) : null);
   }
 
   set(patch, structural = false) {
@@ -130,6 +156,7 @@ export class Inspector {
 
   renderEntity(e) {
     const ed = this.editor;
+    // Simple mode keeps behaviors friendly; Pro shows everything.
     const nameInput = h('input', { type: 'text', class: 'input title-input', value: e.name, 'aria-label': 'Object name' });
     nameInput.addEventListener('change', () => this.set({ name: nameInput.value }, true));
     const head = h('div', { class: 'inspector-head' },
@@ -140,18 +167,19 @@ export class Inspector {
         h('button', { type: 'button', class: 'icon-btn', title: 'Duplicate (Ctrl+D)', 'aria-label': 'Duplicate', onclick: () => ed.duplicateSelected() }, icon('copy')),
         h('button', { type: 'button', class: 'icon-btn danger', title: 'Delete (Del)', 'aria-label': 'Delete', onclick: () => ed.deleteSelected() }, icon('trash'))));
 
-    const pos = vec3Field('Position', e.position, (v) => this.set({ position: v }), { step: 0.25, key: 'position' });
-    const rot = vec3Field('Turn (degrees)', e.rotation, (v) => this.set({ rotation: v }), { step: 15, key: 'rotation' });
-    const scl = vec3Field('Size (times)', e.scale, (v) => this.set({ scale: v }), { step: 0.1, min: 0.02, key: 'scale' });
+    const pro = this.pro;
+    const pos = vec3Field(pro ? 'Location' : 'Position', e.position, (v) => this.set({ position: v }), { step: pro ? 0.1 : 0.25, key: 'position' });
+    const rot = vec3Field(pro ? 'Rotation (deg)' : 'Turn (degrees)', e.rotation, (v) => this.set({ rotation: v }), { step: pro ? 5 : 15, key: 'rotation' });
+    const scl = vec3Field(pro ? 'Scale' : 'Size (times)', e.scale, (v) => this.set({ scale: v }), { step: 0.1, min: 0.02, key: 'scale' });
     this.transformFields = { position: pos, rotation: rot, scale: scl };
     const def = SHAPES[e.shape];
     const sizeNote = h('p', { class: 'field-hint' }, `Actual size: ${e.scale.map((s, i) => (s * def.size[i]).toFixed(2)).join(' x ')} m`);
-    const transform = section('Place and size', pos, rot, scl, sizeNote,
+    const transform = section(pro ? 'Transform' : 'Place and size', pos, rot, scl, sizeNote,
       h('div', { class: 'btn-row' },
-        h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.set({ position: [e.position[0], halfHeight(e), e.position[2]] }, true) }, icon('ground'), 'Put on ground'),
+        h('button', { type: 'button', class: 'btn btn-small', title: 'Drop onto whatever is below (End)', onclick: () => ed.dropSelectedToFloor() }, icon('ground'), pro ? 'Snap to floor' : 'Put on ground'),
         h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.set({ rotation: [0, 0, 0], scale: [1, 1, 1] }, true) }, 'Reset turn and size')));
 
-    const look = section('Look',
+    const look = section(pro ? 'Rendering' : 'Look',
       colorField('Color', e.color, (c) => this.set({ color: c }, true)),
       selectField('Material', e.look, LOOKS, (v) => this.set({ look: v }, true)),
       selectField('Pattern', e.pattern, PATTERNS, (v) => this.set({ pattern: v }, true)),
@@ -179,9 +207,50 @@ export class Inspector {
       const list = e.behaviors.filter((b) => b.type !== type || type === 'script');
       this.set({ behaviors: [...list, { type, params: defaultParams(type) }] }, true);
     });
-    const behaviors = section('Behaviors', e.behaviors.length ? null : h('p', { class: 'muted small' }, 'Behaviors make things move or follow game rules. Pick one below.'), behaviorList, picker);
+    const behaviors = section(pro ? 'Components' : 'Behaviors', e.behaviors.length ? null : h('p', { class: 'muted small' }, pro ? 'Add components to give this actor movement, game rules or code.' : 'Behaviors make things move or follow game rules. Pick one below.'), behaviorList, picker);
 
-    this.root.append(...[head, transform, look, extras, physics, behaviors].filter(Boolean));
+    let info = null;
+    if (pro) {
+      const folder = textField('Folder', e.folder, (v) => this.set({ folder: v }, true), { placeholder: 'For example Level/Walls' });
+      const tags = textField('Tags (comma separated)', e.tags.join(', '), (v) => this.set({ tags: v }, true), { placeholder: 'enemy, boss' });
+      info = section('Info',
+        h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'ID'),
+          h('div', { class: 'inline' }, h('code', { class: 'id-chip' }, e.id), h('button', {
+            type: 'button', class: 'btn btn-small', onclick: () => { navigator.clipboard?.writeText(e.id).then(() => toast('Copied the ID'), () => {}); },
+          }, icon('copy'), 'Copy'))),
+        folder, tags,
+        h('div', { class: 'btn-row' },
+          h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.onSavePrefab?.() }, icon('cube'), 'Save as prefab'),
+          h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.editJson(e) }, icon('file'), 'Edit as JSON')));
+    }
+
+    this.root.append(...[head, transform, look, extras, physics, behaviors, info].filter(Boolean));
+  }
+
+  editJson(e) {
+    const area = h('textarea', { class: 'input code', rows: 22, spellcheck: false });
+    area.value = JSON.stringify(e, null, 2);
+    const status = h('p', { class: 'field-hint' });
+    openDialog({
+      title: `Edit "${e.name}" as JSON`,
+      wide: true,
+      body: h('div', { class: 'json-edit' }, area, status),
+      actions: [
+        { label: 'Cancel', value: null },
+        {
+          label: 'Apply', primary: true, run: () => {
+            try {
+              const data = JSON.parse(area.value);
+              this.editor.updateEntity(e.id, { ...data, id: e.id }, 'inspector');
+              return true;
+            } catch (err) {
+              status.textContent = `That is not valid JSON: ${err.message}`;
+              return false;
+            }
+          },
+        },
+      ],
+    });
   }
 
   behaviorCard(e, b, index) {
@@ -199,7 +268,13 @@ export class Inspector {
         case 'boolean': return checkField(p.label, v, (nv) => update(k, nv));
         case 'color': return colorField(p.label, v, (nv) => update(k, nv, true), { swatches: false });
         case 'vec3': return vec3Field(p.label, v, (nv) => update(k, nv), { step: 0.5 });
-        case 'code': return textField(p.label, v, (nv) => update(k, nv), { multiline: true, code: true, hint: 'Runs while playing. Define onStart(), onUpdate(dt) or onTouch(). Ask the AI helper to write it for you.' });
+        case 'code':
+          if (this.pro && this.onOpenCode) {
+            return h('div', { class: 'field' },
+              h('pre', { class: 'code-preview' }, (v || '').split('\n').slice(0, 6).join('\n')),
+              h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.onOpenCode({ kind: 'object', id: e.id, index }) }, icon('file'), 'Open in Code editor'));
+          }
+          return textField(p.label, v, (nv) => update(k, nv), { multiline: true, code: true, hint: 'Runs while playing. Define onStart(), onUpdate(dt) or onTouch(). Ask the AI helper to write it for you.' });
         default: return textField(p.label, v ?? '', (nv) => update(k, nv));
       }
     });
@@ -218,7 +293,12 @@ export class Inspector {
     const setRule = (patch, structural = false) => ed.setSettings(patch, structural ? 'inspector' : 'inspector-field');
 
     const head = h('div', { class: 'inspector-head' },
-      h('div', {}, h('h2', { class: 'world-title' }, 'World and rules'), h('p', { class: 'muted small' }, 'Nothing is selected, so these settings are for the whole game. Click an object to edit it.')));
+      h('div', {},
+        h('h2', { class: 'world-title' }, this.pro ? 'World Settings' : 'World and rules'),
+        h('p', { class: 'muted small' }, this.pro
+          ? `Sky and ground belong to "${p.levelName}". Game rules and the player are shared by every level.`
+          : 'Nothing is selected, so these settings are for the whole game. Click an object to edit it.')),
+      this.pro && this.onOpenCode ? h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.onOpenCode({ kind: 'game' }) }, icon('file'), 'Edit game script')) : null);
 
     const presets = h('div', { class: 'preset-grid' }, Object.entries(ENV_PRESETS).map(([k, v]) => h('button', {
       type: 'button',

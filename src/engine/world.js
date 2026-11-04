@@ -132,6 +132,15 @@ export class WorldView {
       this.scene.fog.far = 40 + (1 - fogAmount) ** 2 * 460;
     }
 
+    if (this.unlit) {
+      // Editor "Unlit" view: flat, even light so colors are easy to judge.
+      this.sun.intensity = 0;
+      this.hemi.color.set('#ffffff');
+      this.hemi.groundColor.set('#ffffff');
+      this.hemi.intensity = 2.6;
+      this.scene.environmentIntensity = 0.6;
+    }
+
     this.ground.visible = env.showGround;
     this.ground.scale.set(env.groundSize, env.groundSize, 1);
     this.ground.material = getMaterial({ color: env.groundColor, look: 'matte', pattern: env.groundPattern, repeat: env.groundSize / 2 });

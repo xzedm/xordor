@@ -3,10 +3,11 @@ import { applyActions, describeSummary, specToEntity } from '../src/ai/actions.j
 import { parseAssistantReply } from '../src/ai/parse.js';
 import { offlineAssistant } from '../src/ai/offline.js';
 import { buildMessages, systemPrompt, worldSnapshot } from '../src/ai/prompt.js';
-import { createEntity, createProject } from '../src/core/project.js';
+import { createEntity, createProject, levelView } from '../src/core/project.js';
 
 const base = () => {
-  const p = createProject('Test');
+  const p = levelView(createProject('Test'));
+  p.objects = [...p.objects];
   p.objects.push(createEntity('box', { id: 'box_1', name: 'Red Box', color: 'red', position: [2, 0.5, 0] }));
   return p;
 };
@@ -108,6 +109,10 @@ describe('built-in helper', () => {
     const p = run('add 5 red cubes in a line');
     const cubes = p.objects.filter((o) => o.shape === 'box' && o.color === '#ff0000' && o.id !== 'box_1');
     expect(cubes).toHaveLength(5);
+  });
+  it('sets the game script', () => {
+    const { project } = applyActions(base(), [{ do: 'gameScript', code: 'function onStart() { log("hi") }' }]);
+    expect(project.gameScript).toContain('onStart');
   });
   it('changes the sky', () => {
     expect(run('make it night').environment.preset).toBe('night');

@@ -6,7 +6,7 @@ import { ENV_PRESETS, environmentFromPreset } from './environment.js';
 import { clamp, deepClone, newId, parseColor, toNumber, toVec3 } from './util.js';
 
 export const PROJECT_FORMAT = 'xordor-project';
-export const PROJECT_VERSION = 1;
+export const PROJECT_VERSION = 2;
 export const MAX_OBJECTS = 3000;
 
 export const LOOKS = {
@@ -94,6 +94,8 @@ export function createEntity(shape = 'box', overrides = {}) {
     mass: 1,
     bounciness: 0.2,
     visible: true,
+    folder: '',
+    tags: [],
     behaviors: [],
     props: {},
   };
@@ -152,6 +154,9 @@ export function normalizeEntity(raw) {
     mass: toNumber(e.mass, 1, 0.01, 10000),
     bounciness: toNumber(e.bounciness, 0.2, 0, 1),
     visible: e.visible !== false,
+    folder: typeof e.folder === 'string' ? e.folder.trim().replace(/\/+/g, '/').replace(/^\/|\/$/g, '').slice(0, 80) : '',
+    tags: (Array.isArray(e.tags) ? e.tags : typeof e.tags === 'string' ? e.tags.split(',') : [])
+      .map((t) => String(t).trim().slice(0, 32)).filter(Boolean).slice(0, 12),
     behaviors,
     props,
   };
@@ -190,38 +195,130 @@ export function normalizeEnvironment(raw = {}) {
   return env;
 }
 
-export function normalizeProject(raw) {
-  const p = raw && typeof raw === 'object' ? raw : {};
+function normalizeObjects(list) {
   const seen = new Set();
-  const objects = (Array.isArray(p.objects) ? p.objects : []).slice(0, MAX_OBJECTS).map((o) => {
+  return (Array.isArray(list) ? list : []).slice(0, MAX_OBJECTS).map((o) => {
     const e = normalizeEntity(o);
     if (seen.has(e.id)) e.id = newId();
     seen.add(e.id);
     return e;
   });
+}
+
+function normalizeCode(code) {
+  return typeof code === 'string' ? code.slice(0, 200000) : '';
+}
+
+export function normalizeLevel(raw, index = 0) {
+  const l = raw && typeof raw === 'object' ? raw : {};
+  return {
+    id: typeof l.id === 'string' && /^[\w-]{1,64}$/.test(l.id) ? l.id : newId('level'),
+    name: (typeof l.name === 'string' && l.name.trim() ? l.name.trim() : `Level ${index + 1}`).slice(0, 60),
+    environment: normalizeEnvironment(l.environment),
+    objects: normalizeObjects(l.objects),
+  };
+}
+
+export function normalizePrefab(raw) {
+  const p = raw && typeof raw === 'object' ? raw : {};
+  return {
+    id: typeof p.id === 'string' && /^[\w-]{1,64}$/.test(p.id) ? p.id : newId('prefab'),
+    name: (typeof p.name === 'string' && p.name.trim() ? p.name.trim() : 'My prefab').slice(0, 60),
+    objects: normalizeObjects(p.objects).slice(0, 500),
+  };
+}
+
+/**
+ * A project holds game-wide settings plus one or more levels.
+ * Old (version 1) files kept a single level at the top; they are upgraded here.
+ */
+export function normalizeProject(raw) {
+  const p = raw && typeof raw === 'object' ? raw : {};
+  let levels = Array.isArray(p.levels) && p.levels.length
+    ? p.levels.slice(0, 100).map(normalizeLevel)
+    : [normalizeLevel({ id: p.levelId, name: p.levelName || 'Level 1', environment: p.environment, objects: p.objects })];
+  const ids = new Set();
+  levels = levels.map((l) => {
+    if (ids.has(l.id)) l.id = newId('level');
+    ids.add(l.id);
+    return l;
+  });
+  const startLevel = levels.some((l) => l.id === p.startLevel) ? p.startLevel : levels[0].id;
   return {
     format: PROJECT_FORMAT,
     version: PROJECT_VERSION,
     name: (typeof p.name === 'string' && p.name.trim() ? p.name.trim() : 'My Game').slice(0, 80),
     settings: normalizeSettings(p.settings),
-    environment: normalizeEnvironment(p.environment),
-    objects,
+    startLevel,
+    levels,
+    gameScript: normalizeCode(p.gameScript),
+    prefabs: (Array.isArray(p.prefabs) ? p.prefabs : []).slice(0, 200).map(normalizePrefab),
   };
+}
+
+/**
+ * The editable "view" of one level: game-wide fields plus that level's sky and objects.
+ * The editor, the AI helper and the game all work on views.
+ */
+export function levelView(project, levelId = project.startLevel) {
+  const level = project.levels.find((l) => l.id === levelId) || project.levels[0];
+  return {
+    name: project.name,
+    settings: project.settings,
+    gameScript: project.gameScript,
+    levelId: level.id,
+    levelName: level.name,
+    levels: project.levels.map((l) => ({ id: l.id, name: l.name })),
+    environment: level.environment,
+    objects: level.objects,
+  };
+}
+
+/** Cleans up a view (for example after AI changes). */
+export function normalizeView(view) {
+  const v = view && typeof view === 'object' ? view : {};
+  return {
+    name: (typeof v.name === 'string' && v.name.trim() ? v.name.trim() : 'My Game').slice(0, 80),
+    settings: normalizeSettings(v.settings),
+    gameScript: normalizeCode(v.gameScript),
+    levelId: v.levelId,
+    levelName: (typeof v.levelName === 'string' && v.levelName.trim() ? v.levelName.trim() : 'Level').slice(0, 60),
+    levels: Array.isArray(v.levels) ? v.levels : [],
+    environment: normalizeEnvironment(v.environment),
+    objects: normalizeObjects(v.objects),
+  };
+}
+
+/** Writes a view back into its project and returns the new project. */
+export function mergeLevelView(project, view) {
+  const v = normalizeView(view);
+  const levels = project.levels.map((l) => (l.id === v.levelId ? { ...l, name: v.levelName, environment: v.environment, objects: v.objects } : l));
+  return { ...project, name: v.name, settings: v.settings, gameScript: v.gameScript, levels };
 }
 
 export function createProject(name = 'My Game') {
   return normalizeProject({
     name,
-    objects: [createEntity('spawn', { name: 'Player start', position: [0, 0.06, 0], color: '#4fb3ff', physics: 'none' })],
+    levels: [{ name: 'Level 1', objects: [createEntity('spawn', { name: 'Player start', position: [0, 0.06, 0], color: '#4fb3ff', physics: 'none' })] }],
   });
 }
 
+export function createLevel(name = 'New level') {
+  return normalizeLevel({ name, objects: [createEntity('spawn', { name: 'Player start', position: [0, 0.06, 0], color: '#4fb3ff', physics: 'none' })] });
+}
+
+function allObjects(project) {
+  if (Array.isArray(project?.levels)) return [...project.levels.flatMap((l) => l.objects), ...(project.prefabs || []).flatMap((p) => p.objects)];
+  return project?.objects || [];
+}
+
 export function hasScripts(project) {
-  return (project?.objects || []).some((o) => o.behaviors?.some((b) => b.type === 'script'));
+  return !!(project?.gameScript && project.gameScript.trim()) || allObjects(project).some((o) => o.behaviors?.some((b) => b.type === 'script'));
 }
 
 export function stripScripts(project) {
-  for (const o of project.objects) o.behaviors = o.behaviors.filter((b) => b.type !== 'script');
+  for (const o of allObjects(project)) o.behaviors = o.behaviors.filter((b) => b.type !== 'script');
+  if ('gameScript' in project) project.gameScript = '';
   return project;
 }
 

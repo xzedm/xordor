@@ -37,7 +37,7 @@ When you give "behaviors" together with a prefab they are added to the prefab's 
 name, shape, prefab, position [x,y,z], rotation [x,y,z], scale [x,y,z] or a number, size [w,h,d] in meters (instead of scale),
 color (hex like "#ff8800" or a color name), look (${Object.keys(LOOKS).join(' | ')}), pattern (${Object.keys(PATTERNS).join(' | ')}),
 physics (${Object.entries(PHYSICS).map(([k, v]) => `"${k}" = ${v.toLowerCase()}`).join(', ')}),
-mass (for dynamic), bounciness 0..1, visible true/false, props (shape extras, see shapes), behaviors (list).
+mass (for dynamic), bounciness 0..1, visible true/false, folder ("Walls/North", for organizing), tags (["enemy"], scripts can find by tag), props (shape extras, see shapes), behaviors (list).
 
 ## Behaviors: {"type": "...", "params": {...}}. Unlisted params keep their defaults.
 ${describeBehaviors()}
@@ -54,6 +54,10 @@ For "script" the code may define onStart(), onUpdate(dt) and onTouch(). Availabl
 - {"do": "environment", "set": {"preset": "${ENV_PRESET_KEYS.join('|')}", "skyTop": "#..", "skyBottom": "#..", "fog": 0..1, "fogColor": "#..", "sunColor": "#..", "sunIntensity": 0..6, "sunHeight": 2..90, "ambient": 0..3, "stars": true, "showGround": true, "groundColor": "#..", "groundPattern": "grass", "groundSize": 80}}
 - {"do": "settings", "set": {"camera": "${Object.keys(CAMERAS).join('|')}", "winCondition": "${Object.keys(WIN_CONDITIONS).join('|')}", "targetScore": 10, "lives": 3 (0 = unlimited), "timeLimit": seconds (0 = none), "playerSpeed": 7, "jumpPower": 9, "gravity": 22, "playerColor": "#..", "fallLimit": -25, "startMessage": "text shown before playing"}}
 - {"do": "rename", "name": "Game title"}
+- {"do": "gameScript", "code": "function onStart() { ... }\nfunction onUpdate(dt) { ... }"} replaces the project's game script, which runs in every level (no self).
+
+## Levels
+A project can have several levels; you always edit the level named in the snapshot. Settings (rules, player, camera) are shared by all levels. Winning a level moves the player on to the next one.
 
 ## Good habits
 - Use addMany for repeated things instead of many separate adds. Keep each answer under about 300 new objects.
@@ -81,6 +85,8 @@ function compactEntity(o) {
     });
   }
   if (Object.keys(o.props || {}).length) out.props = o.props;
+  if (o.folder) out.folder = o.folder;
+  if (o.tags?.length) out.tags = o.tags;
   return out;
 }
 
@@ -90,6 +96,9 @@ export function worldSnapshot(project, selectedId, maxObjects = 350) {
   const listed = objs.length > maxObjects ? objs.slice(0, maxObjects) : objs;
   const snap = {
     name: project.name,
+    level: project.levelName,
+    allLevels: (project.levels || []).map((l) => l.name),
+    gameScript: project.gameScript ? (project.gameScript.length > 1500 ? project.gameScript.slice(0, 1500) + '\n// ...' : project.gameScript) : '',
     settings: project.settings,
     environment: { preset: project.environment.preset, showGround: project.environment.showGround, groundSize: project.environment.groundSize, groundColor: project.environment.groundColor },
     objectCount: objs.length,

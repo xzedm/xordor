@@ -4,12 +4,12 @@
 import { normalizeProject, PROJECT_FORMAT } from '../core/project.js';
 import { safeStorage } from '../core/util.js';
 
-const AUTOSAVE_KEY = 'xordor.autosave.v1';
+const AUTOSAVE_KEY = 'xordor.autosave.v2';
 const storage = safeStorage();
 
-export function autosave(project) {
+export function autosave(project, { filePath = null, levelId = null } = {}) {
   try {
-    storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), project }));
+    storage.setItem(AUTOSAVE_KEY, JSON.stringify({ savedAt: Date.now(), project, filePath, levelId }));
     return true;
   } catch {
     return false;
@@ -21,7 +21,7 @@ export function loadAutosave() {
     const raw = storage.getItem(AUTOSAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    return data?.project ? { project: normalizeProject(data.project), savedAt: data.savedAt } : null;
+    return data?.project ? { project: normalizeProject(data.project), savedAt: data.savedAt, filePath: data.filePath || null, levelId: data.levelId || null } : null;
   } catch {
     return null;
   }
@@ -46,7 +46,7 @@ export function parseProjectFile(text) {
   }
   const data = JSON.parse(trimmed);
   if (data?.format && data.format !== PROJECT_FORMAT) throw new Error('This file is not a Xordor project.');
-  if (!Array.isArray(data?.objects)) throw new Error('This file has no game objects in it.');
+  if (!Array.isArray(data?.levels) && !Array.isArray(data?.objects)) throw new Error('This file has no game levels in it.');
   return normalizeProject(data);
 }
 

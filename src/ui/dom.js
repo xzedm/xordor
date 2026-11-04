@@ -33,6 +33,7 @@ const P = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" str
 export const ICONS = {
   play: P('<path d="M7 4.5v15l12-7.5z" fill="currentColor"/>'),
   stop: P('<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>'),
+  pause: P('<rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/>'),
   undo: P('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
   redo: P('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
   save: P('<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>'),

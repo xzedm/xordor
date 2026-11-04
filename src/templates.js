@@ -1,5 +1,5 @@
 // Starter games. Each one is built from the same actions the AI helper uses.
-import { createProject } from './core/project.js';
+import { createProject, levelView, mergeLevelView } from './core/project.js';
 import { applyActions } from './ai/actions.js';
 import { offlineAssistant } from './ai/offline.js';
 
@@ -79,8 +79,15 @@ const recipes = {
   ],
 };
 
+/** Builds a starter project (with one level) from a template key. */
 export function buildTemplate(key) {
   const recipe = recipes[key] || recipes.empty;
   const base = createProject(TEMPLATES.find((t) => t.key === key)?.label || 'My Game');
-  return applyActions(base, recipe()).project;
+  const view = applyActions(levelView(base), recipe()).project;
+  return mergeLevelView(base, view);
+}
+
+/** Fills an existing level view with a template's contents (used for new levels). */
+export function templateActions(key) {
+  return (recipes[key] || recipes.empty)().filter((a) => a.do !== 'rename');
 }

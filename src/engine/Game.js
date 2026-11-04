@@ -7,7 +7,8 @@ import { RUNTIME } from './behaviorRuntime.js';
 import { playSound, unlockAudio } from './audio.js';
 import { MOTION_BEHAVIORS } from '../core/behaviors.js';
 import { SHAPES } from '../core/shapes.js';
-import { createEntity } from '../core/project.js';
+import { createEntity, levelView } from '../core/project.js';
+import { logger, scriptErrorLine } from '../core/log.js';
 import { deepClone } from '../core/util.js';
 
 const VISUAL_HOOKS = new Set(['spin', 'bob', 'patrol']);
@@ -32,22 +33,32 @@ export class Game {
    * @param {object} opts
    * @param {HTMLElement} opts.container  element that holds the canvas (HUD goes in here)
    * @param {HTMLCanvasElement} opts.canvas
-   * @param {object} opts.project         normalized project data
+   * @param {object} opts.project         normalized project (with levels)
+   * @param {string} [opts.levelId]       which level to play (default: the start level)
+   * @param {object} [opts.carry]         score and lives carried over from the previous level
+   * @param {object} [opts.spawnAt]       { position: [x,y,z], yaw } to start somewhere else ("play from here")
    * @param {() => void} [opts.onExit]    called when the player wants to go back to the editor
    * @param {boolean} [opts.playOnly]     true for published games
    */
-  constructor({ container, canvas, project, onExit, playOnly = false }) {
+  constructor({ container, canvas, project, levelId, carry = null, spawnAt = null, onExit, playOnly = false }) {
     this.container = container;
     this.canvas = canvas;
-    this.project = deepClone(project);
+    this.fullProject = project;
+    this.project = deepClone(project.levels ? levelView(project, levelId || project.startLevel) : project);
+    const levels = project.levels || [];
+    this.levelIndex = Math.max(0, levels.findIndex((l) => l.id === this.project.levelId));
+    this.levelCount = Math.max(1, levels.length);
+    this.nextLevelId = levels[this.levelIndex + 1]?.id || null;
     this.settings = this.project.settings;
     this.onExit = onExit;
     this.playOnly = playOnly;
+    this.spawnAt = spawnAt;
     this.time = 0;
     this.accumulator = 0;
     this.state = 'ready';
-    this.score = 0;
-    this.lives = this.settings.lives;
+    this.paused = false;
+    this.score = carry?.score || 0;
+    this.lives = carry?.lives ?? this.settings.lives;
     this.inventory = new Set();
     this.runtime = [];
     this.byId = new Map();
@@ -87,11 +98,55 @@ export class Game {
     this.onKey = (e) => {
       if (e.code === 'Escape' && !this.playOnly && this.onExit) this.onExit();
       if (e.code === 'KeyR' && (this.state === 'won' || this.state === 'lost')) this.restart();
+      if (e.code === 'KeyP' && this.state === 'playing') this.setPaused(!this.paused);
       if ((e.code === 'Enter' || e.code === 'Space') && this.state === 'ready') this.begin();
+      if (e.code === 'Enter' && this.state === 'level-complete') this.goToNextLevel();
     };
     window.addEventListener('keydown', this.onKey);
     for (const rt of this.runtime) for (const b of rt.hooks) b.start?.();
+    this.compileGameScript();
     this.updateCamera(0, true);
+    logger.info('game', `Playing "${this.project.levelName || this.project.name}" (${this.runtime.length} objects).`);
+  }
+
+  get levelLabel() {
+    return this.levelCount > 1 ? `Level ${this.levelIndex + 1} of ${this.levelCount}: ${this.project.levelName}` : '';
+  }
+
+  setPaused(on) {
+    if (this.state !== 'playing') return;
+    this.paused = !!on;
+    this.hud.pause.hidden = !this.paused;
+    if (this.paused && document.pointerLockElement) document.exitPointerLock?.();
+    this.onPauseChange?.(this.paused);
+  }
+
+  compileGameScript() {
+    const code = this.project.gameScript;
+    this.gameHooks = null;
+    if (!code || !code.trim()) return;
+    const api = this.makeScriptApi(null);
+    try {
+      // eslint-disable-next-line no-new-func
+      const factory = new Function('game', 'player', 'world', 'THREE', 'log',
+        `"use strict";\n${code}\n;return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null };`);
+      this.gameHooks = factory(api.game, api.player, api.world, THREE, api.log);
+    } catch (err) {
+      this.scriptError(null, err);
+      return;
+    }
+    this.runGameHook('onStart');
+  }
+
+  runGameHook(name, ...args) {
+    const fn = this.gameHooks?.[name];
+    if (!fn) return;
+    try {
+      fn(...args);
+    } catch (err) {
+      this.scriptError(null, err);
+      this.gameHooks = null;
+    }
   }
 
   materialFor(bounciness) {
@@ -158,6 +213,10 @@ export class Game {
     const spawn = this.project.objects.find((o) => o.shape === 'spawn');
     this.spawnPoint = spawn ? new THREE.Vector3(spawn.position[0], spawn.position[1] + 0.7, spawn.position[2]) : new THREE.Vector3(0, 1.2, 0);
     this.yaw = spawn ? spawn.rotation[1] * (Math.PI / 180) : 0;
+    if (this.spawnAt) {
+      this.spawnPoint.set(...this.spawnAt.position);
+      this.yaw = this.spawnAt.yaw ?? this.yaw;
+    }
     this.respawnPoint = this.spawnPoint.clone();
 
     const body = new CANNON.Body({ mass: 1, material: this.playerMaterial, fixedRotation: true, linearDamping: 0, allowSleep: false });
@@ -229,6 +288,7 @@ export class Game {
         ${this.playOnly ? '' : '<button class="hud-stop" type="button" data-stop>Stop <kbd>Esc</kbd></button>'}
       </div>
       <div class="hud-messages" aria-live="polite"></div>
+      <div class="hud-pause" data-pause hidden><div class="hud-card"><h2>Paused</h2><p>Press <kbd>P</kbd> to keep playing.</p></div></div>
       <div class="hud-overlay" data-overlay></div>
     `;
     this.container.appendChild(root);
@@ -240,6 +300,7 @@ export class Game {
       items: root.querySelector('[data-items]'),
       messages: root.querySelector('.hud-messages'),
       overlay: root.querySelector('[data-overlay]'),
+      pause: root.querySelector('[data-pause]'),
     };
     root.querySelector('[data-stop]')?.addEventListener('click', () => this.onExit?.());
     this.showStartOverlay();
@@ -253,6 +314,7 @@ export class Game {
     this.hud.overlay.innerHTML = `
       <div class="hud-card">
         <h2>${escapeHtml(this.project.name)}</h2>
+        ${this.levelLabel ? `<p class="hud-level">${escapeHtml(this.levelLabel)}</p>` : ''}
         <p class="hud-objective">${escapeHtml(this.settings.startMessage || this.objectiveText())}</p>
         <ul class="hud-keys">
           <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrow keys to move</li>
@@ -321,7 +383,12 @@ export class Game {
 
   endGame(won, title, detail) {
     if (this.state !== 'playing') return;
+    if (won && this.nextLevelId && this.onNextLevel) {
+      this.levelComplete(detail);
+      return;
+    }
     this.state = won ? 'won' : 'lost';
+    logger.info('game', `${won ? 'Won' : 'Lost'}: ${title} ${detail || ''}`.trim());
     this.sound(won ? 'win' : 'lose');
     if (document.pointerLockElement) document.exitPointerLock?.();
     const t = Math.round(this.time);
@@ -338,6 +405,28 @@ export class Game {
       </div>`;
     this.hud.overlay.querySelector('[data-again]').addEventListener('click', () => this.restart());
     this.hud.overlay.querySelector('[data-back]')?.addEventListener('click', () => this.onExit?.());
+  }
+
+  levelComplete(detail) {
+    this.state = 'level-complete';
+    this.sound('win');
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    logger.success('game', `Finished level ${this.levelIndex + 1}.`);
+    this.hud.overlay.hidden = false;
+    this.hud.overlay.innerHTML = `
+      <div class="hud-card won">
+        <h2>Level complete!</h2>
+        <p>${escapeHtml(detail || '')}</p>
+        <p class="hud-meta">${this.score ? `Score ${this.score}` : ''}</p>
+        <div class="hud-actions"><button class="btn btn-play" type="button" data-next>Next level <kbd>Enter</kbd></button></div>
+      </div>`;
+    this.hud.overlay.querySelector('[data-next]').addEventListener('click', () => this.goToNextLevel());
+  }
+
+  goToNextLevel() {
+    if (this.state !== 'level-complete') return;
+    this.state = 'leaving';
+    this.onNextLevel?.(this.nextLevelId, { score: this.score, lives: this.lives });
   }
 
   restart() {
@@ -466,17 +555,22 @@ export class Game {
   }
 
   scriptError(rt, err) {
-    const key = rt.entity.id;
-    console.warn(`[Xordor] Custom code error on "${rt.entity.name}":`, err);
+    const key = rt ? rt.entity.id : '__game__';
+    const where = rt ? `"${rt.entity.name}"` : 'the game script';
+    const line = scriptErrorLine(err, rt ? 3 : 3);
     if (this.reportedErrors.has(key)) return;
     this.reportedErrors.add(key);
-    this.message(`Code problem on "${rt.entity.name}": ${err?.message || err}`, 6);
+    logger.error('script', `Error in ${where}${line ? ` (line ${line})` : ''}: ${err?.message || err}`);
+    this.message(`Code problem in ${where}: ${err?.message || err}`, 6);
+    this.onScriptError?.({ id: rt?.entity.id || null, line, message: String(err?.message || err) });
   }
 
   makeScriptApi(rt) {
     const game = this;
+    const who = rt ? rt.entity.name : 'game';
+    const log = (...args) => logger.info('script', `[${who}]`, ...args);
     const colorOf = () => rt.entity.color;
-    const self = {
+    const self = rt && {
       get name() { return rt.entity.name; },
       position: rt.home,
       rotation: rt.homeEuler,
@@ -497,8 +591,27 @@ export class Game {
       distanceToPlayer: () => rt.obj.position.distanceTo(game.playerPosition),
       get touchingPlayer() { return rt.touching; },
     };
+    const world = {
+      find: (name) => {
+        const r = game.runtime.find((x) => !x.dead && x.entity.name === name);
+        return r ? game.makeScriptApi(r).self : null;
+      },
+      findAll: (nameOrTag) => game.runtime
+        .filter((x) => !x.dead && (x.entity.name === nameOrTag || x.entity.tags?.includes(nameOrTag)))
+        .map((x) => game.makeScriptApi(x).self),
+      byTag: (tag) => game.runtime.filter((x) => !x.dead && x.entity.tags?.includes(tag)).map((x) => game.makeScriptApi(x).self),
+      spawn: (spec) => {
+        const r = game.spawn({ ...spec, position: spec?.position || [0, 1, 0] }, { lifetime: spec?.lifetime || 0 });
+        return r ? game.makeScriptApi(r).self : null;
+      },
+      get count() { return game.runtime.filter((x) => !x.dead).length; },
+    };
     const api = {
       get time() { return game.time; },
+      get level() { return game.project.levelName; },
+      get levelNumber() { return game.levelIndex + 1; },
+      completeLevel: (msg) => game.endGame(true, 'You win!', msg || ''),
+      pause: () => game.setPaused(true),
       get score() { return game.score; },
       addScore: (n) => { game.score += Number(n) || 0; game.updateHud(); },
       get lives() { return game.lives; },
@@ -507,7 +620,7 @@ export class Game {
       message: (text, seconds) => game.message(text, seconds || 2.5),
       sound: (name) => game.sound(name),
       spawn: (spec) => {
-        const r = game.spawn({ ...spec, position: spec?.position || rt.obj.position.toArray() }, { lifetime: spec?.lifetime || 0 });
+        const r = game.spawn({ ...spec, position: spec?.position || (rt ? rt.obj.position.toArray() : [0, 1, 0]) }, { lifetime: spec?.lifetime || 0 });
         return r ? game.makeScriptApi(r).self : null;
       },
       find: (name) => {
@@ -524,13 +637,15 @@ export class Game {
       hurt: (n) => game.hurt(n || 1, rt),
       teleport: (x, y, z) => game.teleportPlayer(new THREE.Vector3(x, y, z)),
     };
-    return { self, game: api, player };
+    return { self, game: api, player, world, log };
   }
 
   // ---------- simulation ----------
   frame(dt) {
     dt = Math.min(dt, 0.1);
-    if (this.state === 'playing') {
+    if (this.state === 'playing' && this.paused) {
+      this.input.consumeJump();
+    } else if (this.state === 'playing') {
       this.accumulator += dt;
       let steps = 0;
       while (this.accumulator >= STEP && steps < 6) {
@@ -568,6 +683,8 @@ export class Game {
       }
     }
     this.applyMotion(h, this.time, false);
+    if (this.gameHooks?.onUpdate) this.runGameHook('onUpdate', h);
+    if (this.state !== 'playing') return;
     this.movePlayer(h);
     this.world.step(h);
     this.detectGround();

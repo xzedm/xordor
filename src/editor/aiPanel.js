@@ -7,6 +7,8 @@ import { parseAssistantReply } from '../ai/parse.js';
 import { applyActions, describeSummary, hasChanges } from '../ai/actions.js';
 import { offlineAssistant } from '../ai/offline.js';
 import { safeStorage } from '../core/util.js';
+import { desktop, desktopChat, desktopListModels, isDesktop } from '../platform.js';
+import { logger } from '../core/log.js';
 
 const STORE_KEY = 'xordor.ai.v1';
 const storage = safeStorage();
@@ -30,8 +32,12 @@ export function loadAISettings() {
 }
 
 export function saveAISettings(s) {
-  try { storage.setItem(STORE_KEY, JSON.stringify(s)); } catch { /* storage is optional */ }
+  // In the desktop app keys live in the system key store, never in page storage.
+  const data = isDesktop ? { ...s, keys: {} } : s;
+  try { storage.setItem(STORE_KEY, JSON.stringify(data)); } catch { /* storage is optional */ }
 }
+
+const isAIError = (err) => err instanceof AIError || !!err?.isAIError;
 
 export class AIPanel {
   constructor(root, editor) {
@@ -59,8 +65,27 @@ export class AIPanel {
         this.providerChip),
       this.log,
       h('div', { class: 'chat-compose' }, this.ideas, h('div', { class: 'chat-row' }, this.input, this.sendBtn)));
+    this.keyStatus = { keys: {}, secure: true };
+    this.refreshKeys();
     this.updateChip();
     this.addBubble('assistant', 'Hi! Tell me what you want in your game, like "make a lava level with coins and a finish flag" or "make this cube bounce". I build it right away, and you can undo anything.');
+  }
+
+  async refreshKeys() {
+    if (!isDesktop) return;
+    try { this.keyStatus = await desktop.secrets.status(); } catch { /* keep defaults */ }
+  }
+
+  /** Settings with a stand-in key, so readiness checks work when keys live in the desktop app. */
+  readySettings(s = this.settings) {
+    if (!isDesktop) return s;
+    return { ...s, keys: { [s.provider]: this.keyStatus.keys?.[s.provider] ? 'stored' : '' } };
+  }
+
+  /** Lets other parts of the app (the code editor) ask for something. */
+  ask(text) {
+    this.input.value = text;
+    this.focus();
   }
 
   updateChip() {
@@ -120,7 +145,7 @@ export class AIPanel {
       return;
     }
 
-    const ready = isReady(this.settings);
+    const ready = isReady(this.readySettings());
     if (!ready.ok) {
       this.addBubble('assistant error', ready.reason, h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.openSettings() }, 'Open AI settings'));
       return;
@@ -133,7 +158,8 @@ export class AIPanel {
       if (this.thinking) this.thinking.querySelector('p').textContent = `Asking ${provider.label}... ${Math.round((performance.now() - started) / 1000)}s`;
     }, 1000);
     try {
-      const raw = await chat(this.settings, {
+      logger.info('ai', `Asking ${provider.label} (${this.settings.models?.[this.settings.provider] || provider.defaultModel || 'default model'}): ${text}`);
+      const raw = await (isDesktop ? desktopChat : chat)(this.settings, {
         system: systemPrompt(),
         messages: buildMessages(this.history, text, ed.project, ed.selectedId),
         signal: this.abort.signal,
@@ -144,6 +170,7 @@ export class AIPanel {
       clearInterval(tick);
       this.setBusy(false);
       reply = parseAssistantReply(raw);
+      logger.info('ai', `Reply received in ${Math.round((performance.now() - started) / 100) / 10}s with ${reply.actions.length} action(s).`);
       if (!reply.ok && !reply.message) reply.message = 'The AI replied, but not in a form I could use. Try asking again.';
       this.finish(text, reply, {});
     } catch (err) {
@@ -154,8 +181,9 @@ export class AIPanel {
         return;
       }
       console.warn('[Xordor] AI request failed', err);
-      const msg = err instanceof AIError ? err.message : `Something went wrong: ${err?.message || err}`;
-      const hint = err instanceof AIError ? err.hint : '';
+      const msg = isAIError(err) ? err.message : `Something went wrong: ${err?.message || err}`;
+      const hint = isAIError(err) ? err.hint : '';
+      logger.error('ai', `${msg} ${hint || ''}`.trim());
       this.addBubble('assistant error', hint ? `${msg} ${hint}` : msg,
         h('div', { class: 'btn-row' },
           h('button', { type: 'button', class: 'btn btn-small', onclick: () => this.openSettings() }, 'AI settings'),
@@ -200,6 +228,15 @@ export class AIPanel {
   openSettings() {
     const s = JSON.parse(JSON.stringify(this.settings));
     const body = h('div', { class: 'ai-settings' });
+    const newKeys = {};
+    const replacing = new Set();
+    const saveKeys = async () => {
+      if (!isDesktop) return;
+      for (const [provider, key] of Object.entries(newKeys)) await desktop.secrets.set(provider, key, s.baseUrls?.[provider] || PROVIDERS[provider]?.baseUrl || '');
+      for (const k of Object.keys(newKeys)) delete newKeys[k];
+      replacing.clear();
+      await this.refreshKeys();
+    };
     const render = () => {
       clear(body);
       const id = s.provider;
@@ -217,13 +254,21 @@ export class AIPanel {
         return;
       }
       if (def.needsKey || def.editableUrl) {
-        const keyInput = h('input', { type: 'password', class: 'input', id: 'ai-key', value: s.keys[id] || '', placeholder: def.keyHint || 'Paste your API key', autocomplete: 'off', spellcheck: false });
-        keyInput.addEventListener('input', () => { s.keys[id] = keyInput.value.trim(); });
-        body.append(h('div', { class: 'field' },
-          h('label', { class: 'field-label', for: 'ai-key' }, def.needsKey ? 'API key' : 'API key (optional)'),
-          keyInput,
-          h('p', { class: 'field-hint' }, 'Saved only in this browser and sent only to ', def.label, '. ',
-            def.keyUrl ? h('a', { href: def.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Get a key') : null)));
+        const stored = isDesktop && this.keyStatus.keys?.[id] && !replacing.has(id) && !(id in newKeys);
+        const keyLabel = h('label', { class: 'field-label', for: 'ai-key' }, def.needsKey ? 'API key' : 'API key (optional)');
+        const getKey = def.keyUrl ? h('a', { href: def.keyUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Get a key') : null;
+        if (stored) {
+          body.append(h('div', { class: 'field' }, keyLabel,
+            h('div', { class: 'inline key-saved' }, icon('check'), h('span', {}, this.keyStatus.secure ? 'Key saved, encrypted by your system' : 'Key saved on this computer'),
+              h('button', { type: 'button', class: 'btn btn-small', onclick: () => { replacing.add(id); render(); } }, 'Replace'),
+              h('button', { type: 'button', class: 'btn btn-small', onclick: () => { newKeys[id] = ''; render(); } }, 'Remove')),
+            h('p', { class: 'field-hint' }, 'The key stays in the desktop app and is sent only to ', def.label, '. ', getKey)));
+        } else {
+          const keyInput = h('input', { type: 'password', class: 'input', id: 'ai-key', value: isDesktop ? newKeys[id] || '' : s.keys[id] || '', placeholder: def.keyHint || 'Paste your API key', autocomplete: 'off', spellcheck: false });
+          keyInput.addEventListener('input', () => { if (isDesktop) newKeys[id] = keyInput.value.trim(); else s.keys[id] = keyInput.value.trim(); });
+          body.append(h('div', { class: 'field' }, keyLabel, keyInput,
+            h('p', { class: 'field-hint' }, isDesktop ? (this.keyStatus.secure ? 'Stored encrypted by your system and sent only to ' : 'Stored on this computer and sent only to ') : 'Saved only in this browser and sent only to ', def.label, '. ', getKey)));
+        }
       }
       if (def.editableUrl || id === 'custom') {
         const url = h('input', { type: 'url', class: 'input', id: 'ai-url', value: s.baseUrls[id] || def.baseUrl || '', placeholder: 'https://example.com/v1' });
@@ -240,13 +285,14 @@ export class AIPanel {
         type: 'button', class: 'btn btn-small', onclick: async () => {
           status.textContent = 'Loading models...';
           try {
-            const ids = await listModels(s);
+            await saveKeys();
+            const ids = await (isDesktop ? desktopListModels : listModels)(s);
             clear(datalist);
             for (const m of ids) datalist.append(h('option', { value: m }));
             status.textContent = ids.length ? `Found ${ids.length} models. Click the model box to pick one.` : 'No models found.';
             if (!model.value && ids[0]) { model.value = ids[0]; s.models[id] = ids[0]; }
           } catch (err) {
-            status.textContent = err instanceof AIError ? `${err.message} ${err.hint || ''}` : `Couldn't load models: ${err.message}`;
+            status.textContent = isAIError(err) ? `${err.message} ${err.hint || ''}` : `Couldn't load models: ${err.message}`;
           }
         },
       }, 'Load models');
@@ -266,8 +312,9 @@ export class AIPanel {
       actions: [
         { label: 'Cancel', value: null },
         {
-          label: 'Save', primary: true, run: () => {
-            this.settings = s;
+          label: 'Save', primary: true, run: async () => {
+            await saveKeys();
+            this.settings = isDesktop ? { ...s, keys: {} } : s;
             saveAISettings(s);
             this.updateChip();
             toast(`Using ${PROVIDERS[s.provider].label}`);

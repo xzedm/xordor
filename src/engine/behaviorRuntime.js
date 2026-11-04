@@ -187,9 +187,9 @@ export const RUNTIME = {
     let hooks = null;
     try {
       // eslint-disable-next-line no-new-func
-      const factory = new Function('self', 'game', 'player', 'THREE',
+      const factory = new Function('self', 'game', 'player', 'THREE', 'world', 'log',
         `"use strict";\n${p.code}\n;return {\n onStart: typeof onStart === "function" ? onStart : null,\n onUpdate: typeof onUpdate === "function" ? onUpdate : null,\n onTouch: typeof onTouch === "function" ? onTouch : null };`);
-      hooks = factory(api.self, api.game, api.player, THREE);
+      hooks = factory(api.self, api.game, api.player, THREE, api.world, api.log);
     } catch (err) {
       game.scriptError(rt, err);
     }

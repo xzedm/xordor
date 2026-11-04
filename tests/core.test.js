@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEntity, createProject, hasScripts, normalizeEntity, normalizeProject, stripScripts } from '../src/core/project.js';
+import { createEntity, createLevel, createProject, hasScripts, levelView, mergeLevelView, normalizeEntity, normalizeProject, stripScripts } from '../src/core/project.js';
 import { parseColor, toVec3 } from '../src/core/util.js';
 import { PREFAB_GROUPS, prefabToEntity } from '../src/core/prefabs.js';
 import { SHAPES } from '../src/core/shapes.js';
@@ -25,10 +25,41 @@ describe('vectors', () => {
 });
 
 describe('project data', () => {
-  it('creates a new project with a player start', () => {
+  it('creates a new project with one level and a player start', () => {
     const p = createProject('Test');
     expect(p.name).toBe('Test');
-    expect(p.objects.filter((o) => o.shape === 'spawn')).toHaveLength(1);
+    expect(p.version).toBe(2);
+    expect(p.levels).toHaveLength(1);
+    expect(p.startLevel).toBe(p.levels[0].id);
+    expect(p.levels[0].objects.filter((o) => o.shape === 'spawn')).toHaveLength(1);
+  });
+
+  it('upgrades version 1 files to levels', () => {
+    const p = normalizeProject({ name: 'Old', environment: { preset: 'night' }, objects: [{ shape: 'coin' }] });
+    expect(p.levels).toHaveLength(1);
+    expect(p.levels[0].environment.preset).toBe('night');
+    expect(p.levels[0].objects[0].shape).toBe('coin');
+  });
+
+  it('edits one level through a view without touching the others', () => {
+    const p = createProject('Multi');
+    p.levels.push(createLevel('Second'));
+    const second = p.levels[1].id;
+    const view = levelView(p, second);
+    expect(view.levelName).toBe('Second');
+    expect(view.levels.map((l) => l.name)).toEqual(['Level 1', 'Second']);
+    view.objects = [...view.objects, createEntity('box')];
+    view.settings = { ...view.settings, lives: 7 };
+    const next = mergeLevelView(p, view);
+    expect(next.levels[0].objects).toHaveLength(1);
+    expect(next.levels[1].objects).toHaveLength(2);
+    expect(next.settings.lives).toBe(7);
+  });
+
+  it('keeps folders and tags on objects', () => {
+    const e = normalizeEntity({ shape: 'box', folder: '/Level/Walls/', tags: 'wall, red ,' });
+    expect(e.folder).toBe('Level/Walls');
+    expect(e.tags).toEqual(['wall', 'red']);
   });
 
   it('cleans up bad entity data', () => {
@@ -43,16 +74,21 @@ describe('project data', () => {
 
   it('fixes duplicate ids when loading', () => {
     const p = normalizeProject({ objects: [{ id: 'a' }, { id: 'a' }] });
-    expect(new Set(p.objects.map((o) => o.id)).size).toBe(2);
+    expect(new Set(p.levels[0].objects.map((o) => o.id)).size).toBe(2);
   });
 
-  it('detects and removes custom code', () => {
+  it('detects and removes custom code in every level and the game script', () => {
     const p = createProject();
-    p.objects.push(createEntity('box', { behaviors: [{ type: 'script', params: { code: 'x' } }, { type: 'spin' }] }));
+    p.levels.push(createLevel('Two'));
+    p.levels[1].objects.push(createEntity('box', { behaviors: [{ type: 'script', params: { code: 'x' } }, { type: 'spin' }] }));
     expect(hasScripts(p)).toBe(true);
     stripScripts(p);
     expect(hasScripts(p)).toBe(false);
-    expect(p.objects[1].behaviors).toHaveLength(1);
+    expect(p.levels[1].objects[1].behaviors).toHaveLength(1);
+    p.gameScript = 'function onStart() {}';
+    expect(hasScripts(p)).toBe(true);
+    stripScripts(p);
+    expect(p.gameScript).toBe('');
   });
 
   it('every prefab uses a real shape and real behaviors', () => {
@@ -70,8 +106,28 @@ describe('project data', () => {
   it('builds every template', () => {
     for (const t of TEMPLATES) {
       const p = buildTemplate(t.key);
-      expect(p.objects.length, t.key).toBeGreaterThan(0);
-      expect(p.objects.filter((o) => o.shape === 'spawn'), t.key).toHaveLength(1);
+      const objects = p.levels[0].objects;
+      expect(objects.length, t.key).toBeGreaterThan(0);
+      expect(objects.filter((o) => o.shape === 'spawn'), t.key).toHaveLength(1);
     }
+  });
+});
+
+describe('project files', async () => {
+  const { parseProjectFile, projectToFile } = await import('../src/editor/storage.js');
+  it('reads back what it saves, levels included', () => {
+    const p = createProject('Round trip');
+    p.levels.push(createLevel('Two'));
+    p.gameScript = 'function onStart() {}';
+    const back = parseProjectFile(projectToFile(p));
+    expect(back.levels.map((l) => l.name)).toEqual(['Level 1', 'Two']);
+    expect(back.gameScript).toBe(p.gameScript);
+  });
+  it('still reads version 1 files', () => {
+    const back = parseProjectFile(JSON.stringify({ format: 'xordor-project', version: 1, name: 'Old', objects: [{ shape: 'coin' }] }));
+    expect(back.levels[0].objects[0].shape).toBe('coin');
+  });
+  it('rejects files that are not projects', () => {
+    expect(() => parseProjectFile('{"hello": 1}')).toThrow();
   });
 });

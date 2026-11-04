@@ -315,6 +315,11 @@ export function applyActions(project, actions, { selectedId = null } = {}) {
           if (typeof name === 'string' && name.trim()) { p.name = name.trim().slice(0, 80); summary.rules = true; }
           break;
         }
+        case 'gamescript':
+        case 'game_script': {
+          if (typeof raw.code === 'string') { p.gameScript = raw.code.slice(0, 200000); summary.rules = true; }
+          break;
+        }
         case 'select': {
           const targets = matchTargets(p, raw, selectedId);
           if (targets[0]) select = targets[0].id;

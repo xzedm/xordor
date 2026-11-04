@@ -1,5 +1,6 @@
-// Connects to AI services. Everything runs in the browser: your API key is
-// kept in this browser only and sent straight to the provider you pick.
+// Connects to AI services. In the desktop app this runs in the main process,
+// where keys are stored; in a browser it runs in the page. Either way the key
+// is sent only to the provider you pick.
 import Anthropic from '@anthropic-ai/sdk';
 
 export const PROVIDERS = {
@@ -121,6 +122,9 @@ export const PROVIDERS = {
     editableUrl: true,
   },
 };
+
+// The same code runs in the desktop app's main process (Node) and in a browser.
+const IN_BROWSER = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 // Claude models that accept server-side refusal fallbacks ("default" routing).
 const CLAUDE_FALLBACK_MODELS = new Set(['claude-opus-5-5', 'claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5-5']);
@@ -260,7 +264,7 @@ async function chatGemini(cfg, { system, messages, signal }) {
 }
 
 async function chatAnthropic(cfg, { system, messages, signal, onProgress }) {
-  const client = new Anthropic({ apiKey: cfg.apiKey, dangerouslyAllowBrowser: true, maxRetries: 1 });
+  const client = new Anthropic({ apiKey: cfg.apiKey, dangerouslyAllowBrowser: IN_BROWSER, maxRetries: 1 });
   const params = {
     model: cfg.model,
     max_tokens: 64000,
@@ -311,7 +315,7 @@ export async function listModels(settings) {
   if (cfg.def.needsKey && !cfg.apiKey) throw new AIError('Add your API key first.');
   try {
     if (cfg.def.kind === 'anthropic') {
-      const client = new Anthropic({ apiKey: cfg.apiKey, dangerouslyAllowBrowser: true, maxRetries: 0 });
+      const client = new Anthropic({ apiKey: cfg.apiKey, dangerouslyAllowBrowser: IN_BROWSER, maxRetries: 0 });
       const ids = [];
       for await (const m of client.models.list({ limit: 100 })) ids.push(m.id);
       return ids;
