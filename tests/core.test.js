@@ -1,0 +1,77 @@
+import { describe, expect, it } from 'vitest';
+import { createEntity, createProject, hasScripts, normalizeEntity, normalizeProject, stripScripts } from '../src/core/project.js';
+import { parseColor, toVec3 } from '../src/core/util.js';
+import { PREFAB_GROUPS, prefabToEntity } from '../src/core/prefabs.js';
+import { SHAPES } from '../src/core/shapes.js';
+import { BEHAVIORS } from '../src/core/behaviors.js';
+import { buildTemplate, TEMPLATES } from '../src/templates.js';
+
+describe('colors', () => {
+  it('understands names, short hex and rgb', () => {
+    expect(parseColor('red')).toBe('#ff0000');
+    expect(parseColor('#0f0')).toBe('#00ff00');
+    expect(parseColor('rgb(0, 0, 255)')).toBe('#0000ff');
+    expect(parseColor('light blue')).toBe('#add8e6');
+    expect(parseColor('not a color', '#123456')).toBe('#123456');
+  });
+});
+
+describe('vectors', () => {
+  it('accepts arrays, numbers and objects', () => {
+    expect(toVec3([1, 2, 3])).toEqual([1, 2, 3]);
+    expect(toVec3(2)).toEqual([2, 2, 2]);
+    expect(toVec3({ x: 1, y: 'a', z: 3 }, [9, 9, 9])).toEqual([1, 9, 3]);
+  });
+});
+
+describe('project data', () => {
+  it('creates a new project with a player start', () => {
+    const p = createProject('Test');
+    expect(p.name).toBe('Test');
+    expect(p.objects.filter((o) => o.shape === 'spawn')).toHaveLength(1);
+  });
+
+  it('cleans up bad entity data', () => {
+    const e = normalizeEntity({ shape: 'nope', position: [1, 'x'], scale: -5, color: 'blue', physics: 'weird', behaviors: [{ type: 'spin', params: { speed: '45' } }, { type: 'fly' }] });
+    expect(e.shape).toBe('box');
+    expect(e.position).toEqual([1, 0.5, 0]);
+    expect(e.scale.every((v) => v > 0)).toBe(true);
+    expect(e.color).toBe('#0000ff');
+    expect(e.physics).toBe('static');
+    expect(e.behaviors).toEqual([{ type: 'spin', params: { axis: 'y', speed: 45 } }]);
+  });
+
+  it('fixes duplicate ids when loading', () => {
+    const p = normalizeProject({ objects: [{ id: 'a' }, { id: 'a' }] });
+    expect(new Set(p.objects.map((o) => o.id)).size).toBe(2);
+  });
+
+  it('detects and removes custom code', () => {
+    const p = createProject();
+    p.objects.push(createEntity('box', { behaviors: [{ type: 'script', params: { code: 'x' } }, { type: 'spin' }] }));
+    expect(hasScripts(p)).toBe(true);
+    stripScripts(p);
+    expect(hasScripts(p)).toBe(false);
+    expect(p.objects[1].behaviors).toHaveLength(1);
+  });
+
+  it('every prefab uses a real shape and real behaviors', () => {
+    for (const g of PREFAB_GROUPS) {
+      for (const item of g.items) {
+        expect(SHAPES[item.shape], item.key).toBeTruthy();
+        for (const b of item.behaviors || []) expect(BEHAVIORS[b.type], `${item.key}.${b.type}`).toBeTruthy();
+        const { overrides } = prefabToEntity(item.key);
+        const e = createEntity(item.shape, overrides);
+        expect(e.behaviors.length).toBe((item.behaviors || []).length);
+      }
+    }
+  });
+
+  it('builds every template', () => {
+    for (const t of TEMPLATES) {
+      const p = buildTemplate(t.key);
+      expect(p.objects.length, t.key).toBeGreaterThan(0);
+      expect(p.objects.filter((o) => o.shape === 'spawn'), t.key).toHaveLength(1);
+    }
+  });
+});
