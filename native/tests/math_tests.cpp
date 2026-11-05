@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <initializer_list>
 
 using namespace Engine;
 
@@ -116,6 +117,24 @@ TEST_CASE("decomposeTRS undoes composeTRS") {
     const Mat4 mirrored = Math::composeTRS(t, r, Vec3(-1.0f, 1.0f, 1.0f));
     Math::decomposeTRS(mirrored, t2, r2, s2);
     CHECK(Math::nearlyEqual(Math::composeTRS(t2, r2, s2), mirrored, 1e-5f));
+}
+
+TEST_CASE("eulerDegreesFromQuat gives back the angles quatFromEulerDegrees used") {
+    for (const Vec3& angles : {Vec3(0.0f), Vec3(0.0f, 90.0f, 0.0f), Vec3(30.0f, -45.0f, 10.0f),
+                               Vec3(-80.0f, 170.0f, -120.0f), Vec3(12.5f, 0.0f, 179.0f)}) {
+        CAPTURE(angles);
+        const Vec3 back = Math::eulerDegreesFromQuat(Math::quatFromEulerDegrees(angles));
+        CHECK(Math::nearlyEqual(back, angles, 1e-3f));
+    }
+}
+
+TEST_CASE("eulerDegreesFromQuat at gimbal lock still rebuilds the same rotation") {
+    const Quat lookingDown = Math::quatFromEulerDegrees(Vec3(-90.0f, 30.0f, 20.0f));
+    const Vec3 angles = Math::eulerDegreesFromQuat(lookingDown);
+    CHECK(angles.x == doctest::Approx(-90.0f).epsilon(1e-3));
+    CHECK(angles.z == 0.0f);
+    // Not the same numbers (yaw and roll merged), but the same rotation.
+    CHECK(Math::nearlyEqual(Math::quatFromEulerDegrees(angles), lookingDown, 1e-3f));
 }
 
 } // TEST_SUITE

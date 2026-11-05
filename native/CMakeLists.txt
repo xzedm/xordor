@@ -36,7 +36,15 @@ add_subdirectory(third_party/glad)
 
 # ---------------------------------------------------------------- the engine
 add_library(XordorEngine STATIC
+  src/assets/AssetManager.cpp
+  src/assets/AssetRegistry.cpp
+  src/assets/CgltfImpl.cpp
+  src/assets/GltfImport.cpp
+  src/assets/JsonUtil.cpp
+  src/assets/ObjImport.cpp
+  src/assets/SceneSerializer.cpp
   src/core/Application.cpp
+  src/core/AssetId.cpp
   src/core/Geometry.cpp
   src/core/Input.cpp
   src/core/Log.cpp
@@ -68,10 +76,11 @@ target_include_directories(XordorEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # GLM and glad are PUBLIC because engine headers and apps use them directly.
 # GLFW is PRIVATE: only Window.cpp talks to it, so apps never see GLFW types.
-# stb is PRIVATE too: Image.h wraps it.
+# stb and cgltf are PRIVATE too: Image.h and ModelImport.h wrap them.
+# nlohmann_json is PUBLIC: asset headers use its Json type in their API.
 target_link_libraries(XordorEngine
-  PUBLIC glm::glm glad
-  PRIVATE glfw stb
+  PUBLIC glm::glm glad nlohmann_json::nlohmann_json
+  PRIVATE glfw stb cgltf
 )
 target_compile_definitions(XordorEngine PUBLIC
   GLM_FORCE_XYZW_ONLY    # vec.x/.y/.z/.w only (no .r/.s aliases): clearer and faster to compile

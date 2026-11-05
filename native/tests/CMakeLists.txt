@@ -1,6 +1,7 @@
 # Unit tests: plain functions and classes only, so they run without a window or GPU.
 add_executable(engine_tests
   test_main.cpp
+  asset_tests.cpp
   camera_tests.cpp
   ecs_tests.cpp
   geometry_tests.cpp
@@ -8,8 +9,10 @@ add_executable(engine_tests
   input_tests.cpp
   log_tests.cpp
   math_tests.cpp
+  model_tests.cpp
   primitives_tests.cpp
   scene_tests.cpp
+  serializer_tests.cpp
   shader_log_tests.cpp
   time_tests.cpp
 )
@@ -17,7 +20,7 @@ target_link_libraries(engine_tests PRIVATE Xordor::Engine doctest::doctest)
 xe_set_warnings(engine_tests)
 
 # Each test file shows up as its own entry in `ctest`, so a failure names the module.
-foreach(suite camera ecs geometry image input log math primitives scene shaderlog time)
+foreach(suite assets camera ecs geometry image input log math models primitives scene serializer shaderlog time)
   add_test(NAME ${suite} COMMAND engine_tests --test-suite=${suite})
 endforeach()
 

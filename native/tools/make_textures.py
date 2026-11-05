@@ -7,7 +7,10 @@ Python (zlib and struct only), so anyone can tweak and regenerate them:
 
     python3 tools/make_textures.py
 
-Output: assets/textures/crate.png (a wooden crate face, 128x128 RGBA).
+Output (all RGBA PNGs):
+    assets/textures/crate.png     a wooden crate face, 128x128
+    assets/textures/checker.png   a gray checkerboard for floors, 256x256, 8x8 cells
+    assets/textures/barrel.png    wooden staves with two metal bands, 128x128
 """
 
 import math
@@ -97,13 +100,50 @@ def make_crate(path):
     write_png(path, SIZE, SIZE, rows)
 
 
+def make_checker(path, size=256, cells=8):
+    light, dark = (140, 140, 140), (107, 107, 107)  # 0.55 and 0.42 of 255
+    rows = []
+    for y in range(size):
+        row = bytearray()
+        for x in range(size):
+            c = light if ((x * cells // size) + (y * cells // size)) % 2 == 0 else dark
+            row += bytes((*c, 255))
+        rows.append(row)
+    write_png(path, size, size, rows)
+
+
+def make_barrel(path):
+    """u runs around the barrel, v from bottom to top (image top = barrel top)."""
+    rng = random.Random(7)
+    staves = 12
+    shades = [0.85 + 0.3 * rng.random() for _ in range(staves)]
+    wood = (150, 98, 52)
+    metal = (78, 80, 86)
+    rows = []
+    for y in range(SIZE):
+        row = bytearray()
+        for x in range(SIZE):
+            stave = x * staves // SIZE
+            if 18 <= y < 28 or 100 <= y < 110:  # metal bands
+                c = metal if y not in (18, 27, 100, 109) else (50, 50, 55)
+            elif x % (SIZE // staves) == 0:  # dark gap between staves
+                c = (60, 38, 20)
+            else:
+                k = shades[stave] * (0.92 + 0.08 * math.sin(y * 0.7 + stave))
+                c = tuple(min(255, int(v * k)) for v in wood)
+            row += bytes((*c, 255))
+        rows.append(row)
+    write_png(path, SIZE, SIZE, rows)
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     out_dir = os.path.join(here, "..", "assets", "textures")
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.normpath(os.path.join(out_dir, "crate.png"))
-    make_crate(path)
-    print("wrote", path)
+    for name, maker in (("crate.png", make_crate), ("checker.png", make_checker), ("barrel.png", make_barrel)):
+        path = os.path.normpath(os.path.join(out_dir, name))
+        maker(path)
+        print("wrote", path)
 
 
 if __name__ == "__main__":

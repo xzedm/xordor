@@ -4,6 +4,7 @@
 //   camera entity  (CameraComponent + Transform)  ->  CameraView
 //   light entity   (LightComponent + Transform)   ->  DirectionalLight
 //   every MeshRenderer + Transform                ->  renderer.submit(...)
+//                (mesh and texture ids are turned into GPU objects by RenderAssets)
 //
 // The renderer (Phase 2) knows nothing about entities, and the scene knows
 // nothing about OpenGL. This file is the only place the two meet, so either
@@ -11,7 +12,10 @@
 
 #include "render/ForwardRenderer.h"
 #include "render/Mesh.h"
+#include "scene/RenderAssets.h"
 #include "scene/Scene.h"
+
+#include <unordered_set>
 
 namespace Engine {
 
@@ -30,7 +34,7 @@ public:
     // Draws the scene through its primary camera, blending every transform by
     // alpha (pass the alpha from Application::onRender).
     // aspect = framebuffer width / height.
-    void render(const Scene& scene, float aspect, float alpha);
+    void render(const Scene& scene, RenderAssets& assets, float aspect, float alpha);
 
     bool showColliders = false;            // draw collider shapes as wireframes
     Vec3 colliderColor{0.25f, 1.0f, 0.35f};
@@ -44,6 +48,7 @@ private:
     // Missing camera or light is logged once, not every frame.
     bool warnedNoCamera_ = false;
     bool warnedNoLight_ = false;
+    std::unordered_set<Entity> warnedMissingMesh_;
 };
 
 } // namespace Engine

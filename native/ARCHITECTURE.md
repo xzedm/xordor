@@ -18,7 +18,7 @@ Each folder under `src/` is a module. A module may only depend on the modules ab
 core/       Log, Assert, Math (GLM wrapper), Geometry, Time, Input, Window, App (Phases 1-3)
 render/     Shader, Mesh, Texture, Camera, ForwardRenderer                        (Phase 2)
 scene/      Entity, Registry, Scene, components, SceneRenderer, collision         (Phases 3 and 6)
-assets/     AssetId (GUID), AssetRegistry, importers, TextureCache, JSON I/O      (Phase 4)
+assets/     AssetRegistry (.meta GUIDs), AssetManager caches, OBJ/glTF import, JSON scenes (Phase 4)
 scripting/  Lua state, bindings, ScriptComponent                                  (Phase 6)
 editor/     Editor app: docking, viewport, outliner, inspector, undo/redo         (Phase 5)
 game/       The sample shooter, built only on the public engine API               (Phase 7)
@@ -53,7 +53,8 @@ sandbox/    A playground app that grows with each phase
 | scene | `Entity`, `Registry`, `Scene` | An entity is a generational id. The registry keeps components in per-type packed arrays; the scene adds the parent-child hierarchy |
 | scene | `Transform`, `MeshRenderer`, `CameraComponent`, `LightComponent`, `Collider` | Plain data structs, no virtual functions |
 | scene | `SceneRenderer` | The only bridge between scene and renderer: turns entities into draw calls |
-| assets | `AssetRegistry` | Maps GUIDs to files on disk and loaded objects, so scenes refer to assets by id, never by path |
+| assets | `AssetRegistry`, `AssetManager` | The registry maps GUIDs (kept in `.meta` files) to files; the manager loads each asset once and shares it. Scenes refer to assets by id, never by path |
+| assets | `SceneSerializer` | Scenes to and from readable JSON; apps register their own components |
 | scripting | `ScriptHost` | Owns the Lua state and calls `onStart`, `onUpdate`, `onCollision` on scripts |
 | editor | `EditorApp`, `UndoStack`, panels | Edits a `Scene` through commands that can be undone |
 
@@ -102,7 +103,8 @@ A custom language would teach parsing, not engines, and would take longer than e
 | glad 2 (generated, OpenGL 4.1 core) | Loading OpenGL functions | 1 |
 | GLM 1.0.1 | Vectors, matrices, quaternions | 1 |
 | doctest 2.4.11 | Unit tests | 1 |
-| stb_image, Assimp | Textures, OBJ / glTF meshes | 2, 4 |
+| stb_image | Textures | 2 |
+| cgltf (+ our own OBJ reader) | glTF / OBJ meshes. Chosen over Assimp: two formats don't justify a million-line dependency | 4 |
 | nlohmann/json | Scene and asset files | 4 |
 | Dear ImGui (docking), ImGuizmo | Editor UI and gizmos | 5 |
 | Lua 5.4, sol2 | Scripting | 6 |

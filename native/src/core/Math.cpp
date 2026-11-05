@@ -49,6 +49,31 @@ Quat quatFromEulerDegrees(const Vec3& pitchYawRollDegrees) {
     return yaw * pitch * roll;
 }
 
+Vec3 eulerDegreesFromQuat(const Quat& rotation) {
+    // Multiplying out R = Ry(yaw) * Rx(pitch) * Rz(roll) gives a matrix whose
+    // entries are products of sines and cosines (rows r, columns c):
+    //   R(1,2) = -sin(pitch)
+    //   R(0,2) =  sin(yaw) cos(pitch)     R(2,2) = cos(yaw) cos(pitch)
+    //   R(1,0) =  cos(pitch) sin(roll)    R(1,1) = cos(pitch) cos(roll)
+    // so each angle can be read back with asin or atan2.
+    const Mat3 m = glm::mat3_cast(glm::normalize(rotation));
+    const auto R = [&](int row, int col) { return m[col][row]; }; // GLM stores columns
+    const float sinPitch = clamp(-R(1, 2), -1.0f, 1.0f);
+    const float pitch = std::asin(sinPitch);
+    float yaw;
+    float roll;
+    if (std::fabs(sinPitch) < 0.99999f) {
+        yaw = std::atan2(R(0, 2), R(2, 2));
+        roll = std::atan2(R(1, 0), R(1, 1));
+    } else {
+        // Gimbal lock: cos(pitch) = 0 wipes out the entries above. With roll
+        // fixed at 0, R(0,0) = cos(yaw) and R(2,0) = -sin(yaw).
+        yaw = std::atan2(-R(2, 0), R(0, 0));
+        roll = 0.0f;
+    }
+    return Vec3(toDegrees(pitch), toDegrees(yaw), toDegrees(roll));
+}
+
 Mat4 composeTRS(const Vec3& translation, const Quat& rotation, const Vec3& scale) {
     const Mat4 t = glm::translate(Mat4(1.0f), translation);
     const Mat4 r = glm::mat4_cast(rotation);

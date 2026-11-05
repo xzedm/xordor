@@ -1,30 +1,27 @@
-// Sandbox, Phase 3: a scene made of entities and components.
+// Sandbox, Phase 4: the entity scene, now made of asset files and saved as JSON.
 //
-// Everything on screen is an entity in a Scene: the camera, the sun, the
-// ground, the crates, the ball and the little solar system. The sandbox adds
-// two components of its own, Spin and Patrol, to show that any plain struct
-// can be a component, and that a "system" is just a loop over the entities
-// that have the components it needs.
+// At start the sandbox scans the assets folder (giving every file an id in a
+// .meta file), then loads assets/scenes/sandbox.scene.json. If that file is
+// missing it builds the scene in code and saves it, so the file always exists
+// to open in a text editor. Meshes and textures are referred to by asset id
+// and loaded the first time they're drawn: the barrel is an OBJ file, the
+// rock a glTF file, and every texture a PNG.
 //
-// What to look at:
-//   * The orrery (right): the planet is a child of the spinning arm, and the
-//     moon a child of the planet. Nothing moves the moon directly; it is
-//     carried by its parents. Press B to detach the planet: it stays where it
-//     is (keepWorldTransform) and stops orbiting, but the moon still circles
-//     it. B again re-attaches it.
-//   * The ball patrols through the row of crates. Each fixed step asks the
-//     collision code what the ball overlaps, and those crates turn red.
-//     C shows the colliders as green wireframes.
-//   * N spawns a crate in front of the camera, Backspace removes the newest,
-//     Delete removes the whole "Spawned" group: destroying a parent destroys
-//     its children.
-//   * Tab prints the scene's hierarchy to the log (a preview of Phase 5's outliner).
-//   * P pauses the simulation. Everything still renders: rendering and
-//     simulation are separate.
-//   * Hold the right mouse button to fly (WASD, Q/E, Shift, scroll). J/L/I/K
-//     move the sun. R reload shaders, F1 wireframe, V vsync, F12 screenshot,
-//     H help, Esc quits.
+// What to try:
+//   * F5 saves the scene, F9 loads it back. Move things (B, N, Delete...),
+//     save, quit, start again: they're where you left them.
+//   * Edit the scene file while the sandbox runs (change a crate's
+//     "position", or the "baseColor" of the ball), save it, press F9.
+//   * Break the file on purpose (delete a comma) and press F9: the error
+//     names the line, and the scene on screen stays as it was.
+//   * Tab prints the hierarchy, A prints the asset list with ids.
+//   * The Phase 3 controls still work: C colliders, P pause, B detach the
+//     planet, N / Backspace / Delete add and remove crates, right mouse +
+//     WASD to fly, J/L/I/K sun, R shaders, F1 wireframe, F12 screenshot, Esc.
 
+#include "assets/AssetManager.h"
+#include "assets/AssetRegistry.h"
+#include "assets/SceneSerializer.h"
 #include "core/Application.h"
 #include "core/Log.h"
 #include "core/Math.h"
@@ -33,10 +30,6 @@
 #include "render/Camera.h"
 #include "render/FlyCameraController.h"
 #include "render/ForwardRenderer.h"
-#include "render/Image.h"
-#include "render/Mesh.h"
-#include "render/Primitives.h"
-#include "render/Texture.h"
 #include "scene/Collision.h"
 #include "scene/Scene.h"
 #include "scene/SceneRenderer.h"
@@ -45,6 +38,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -54,6 +48,8 @@
 using namespace Engine;
 
 namespace {
+
+const char* ScenePath = "scenes/sandbox.scene.json"; // relative to the assets folder
 
 // ---------------------------------------------------------------- the sandbox's own components
 // Turns the entity around an axis at a steady rate.
@@ -74,16 +70,41 @@ struct HitHighlight {
     Vec3 normalColor{1.0f};
 };
 
+// Teaches the serializer the three components above, so they're saved too.
+void registerSandboxComponents(SceneSerializer& serializer) {
+    serializer.registerComponent<Spin>(
+        "spin", [](const Spin& s) { return Json{{"axis", jsonArray(s.axis)}, {"degreesPerSecond", tidy(s.degreesPerSecond)}}; },
+        [](Spin& s, const Json& j) {
+            s.axis = readVec3(j, "axis", Vec3(0.0f, 1.0f, 0.0f));
+            s.degreesPerSecond = readFloat(j, "degreesPerSecond", 45.0f);
+        });
+    serializer.registerComponent<Patrol>(
+        "patrol", [](const Patrol& p) { return Json{{"minX", tidy(p.minX)}, {"maxX", tidy(p.maxX)}, {"speed", tidy(p.speed)}}; },
+        [](Patrol& p, const Json& j) {
+            p.minX = readFloat(j, "minX", -5.0f);
+            p.maxX = readFloat(j, "maxX", 5.0f);
+            p.speed = readFloat(j, "speed", 2.0f);
+        });
+    serializer.registerComponent<HitHighlight>(
+        "hitHighlight",
+        [](const HitHighlight& h) { return Json{{"normalColor", jsonArray(h.normalColor)}}; },
+        [](HitHighlight& h, const Json& j) { h.normalColor = readVec3(j, "normalColor", Vec3(1.0f)); });
+}
+
 struct Options {
     long long frames = 0;
     bool vsync = true;
+    bool rebuildScene = false;
     std::string screenshotPath;
 };
 
 class Sandbox final : public Application {
 public:
-    Sandbox(ApplicationSettings settings, std::string screenshotPath)
-        : Application(std::move(settings)), screenshotPath_(std::move(screenshotPath)) {}
+    Sandbox(ApplicationSettings settings, Options options)
+        : Application(std::move(settings)), options_(std::move(options)), registry_(assetDirectory()),
+          serializer_(&registry_) {
+        registerSandboxComponents(serializer_);
+    }
 
 protected:
     void onStart() override {
@@ -92,19 +113,20 @@ protected:
         const IVec2 fb = window().framebufferSize();
         renderer_->setViewport(fb.x, fb.y);
 
-        loadResources();
-        buildScene();
-        freeCamera_.position = Vec3(1.0f, 3.0f, 7.0f);
-        freeCamera_.lookAt(Vec3(1.8f, 0.9f, -2.5f));
-        followFreeCamera();
+        registry_.scan();
+        assets_ = std::make_unique<AssetManager>(registry_);
+
+        if (options_.rebuildScene || !loadSceneFile()) {
+            ENGINE_INFO("Building the default scene in code");
+            buildDefaultScene();
+            findSceneEntities(); // the same set-up as after loading a file
+            saveSceneFile();
+        }
         printHelp();
-        printHierarchy();
     }
 
     void onFixedUpdate(double dtSeconds) override {
-        // First, always: remember where everything is, so rendering can blend
-        // from here to wherever this step moves things.
-        scene_.beginFixedStep();
+        scene_.beginFixedStep(); // first, always: lets rendering blend toward this step
         if (paused_) {
             return;
         }
@@ -132,7 +154,8 @@ protected:
         if (fb.x == 0 || fb.y == 0) {
             return; // minimized
         }
-        sceneRenderer_->render(scene_, static_cast<float>(fb.x) / static_cast<float>(fb.y), static_cast<float>(alpha));
+        sceneRenderer_->render(scene_, *assets_, static_cast<float>(fb.x) / static_cast<float>(fb.y),
+                               static_cast<float>(alpha));
         maybeTakeScreenshot(fb);
     }
 
@@ -144,8 +167,6 @@ protected:
 
 private:
     // ---------------------------------------------------------------- systems
-    // A system is a function that loops over the entities with certain
-    // components. It holds no data of its own; all state is in components.
     void spinSystem(float dt) {
         scene_.registry().each<Spin, Transform>([&](Entity, Spin& spin, Transform& t) {
             const Quat step = glm::angleAxis(Math::toRadians(spin.degreesPerSecond) * dt, glm::normalize(spin.axis));
@@ -158,15 +179,18 @@ private:
             t.position.x += p.speed * dt;
             if (t.position.x > p.maxX || t.position.x < p.minX) {
                 t.position.x = Math::clamp(t.position.x, p.minX, p.maxX);
-                p.speed = -p.speed; // turn around
+                p.speed = -p.speed;
             }
         });
     }
 
     void hitHighlightSystem() {
-        // Collision detection runs in the fixed step, on the current (not
-        // blended) positions, so the result is the same at any frame rate.
-        const std::vector<Entity> hits = overlapping(scene_, ball_);
+        // Every entity with a Patrol is a "ball" that lights up what it touches.
+        std::vector<Entity> hits;
+        scene_.registry().each<Patrol>([&](Entity e, Patrol&) {
+            const std::vector<Entity> touching = overlapping(scene_, e);
+            hits.insert(hits.end(), touching.begin(), touching.end());
+        });
         overlapCount_ = static_cast<int>(hits.size());
         scene_.registry().each<HitHighlight, MeshRenderer>([&](Entity e, HitHighlight& h, MeshRenderer& mr) {
             const bool hit = std::find(hits.begin(), hits.end(), e) != hits.end();
@@ -174,119 +198,184 @@ private:
         });
     }
 
-    // ---------------------------------------------------------------- setup
-    void loadResources() {
-        cube_ = std::make_unique<Mesh>(Primitives::cube());
-        plane_ = std::make_unique<Mesh>(Primitives::plane());
-        sphere_ = std::make_unique<Mesh>(Primitives::sphere(0.5f, 48, 24));
-        std::string error;
-        if (auto texture = Texture::fromFile(assetPath("textures/crate.png"), {}, &error)) {
-            crate_ = std::make_unique<Texture>(std::move(*texture));
-        } else {
-            ENGINE_WARN("Using a checkerboard instead of the crate texture: ", error);
-            crate_ = std::make_unique<Texture>(makeCheckerboard(64, 4, Vec3(0.8f, 0.5f, 0.2f), Vec3(0.4f, 0.2f, 0.1f)));
+    // ---------------------------------------------------------------- scene files
+    std::string scenePath() const { return registry_.root() + "/" + ScenePath; }
+
+    bool loadSceneFile() {
+        if (!std::filesystem::exists(scenePath())) {
+            ENGINE_INFO("No scene file yet at ", scenePath());
+            return false;
         }
-        ground_ = std::make_unique<Texture>(makeCheckerboard(256, 8, Vec3(0.55f), Vec3(0.42f)));
+        std::string error;
+        if (!serializer_.load(scenePath(), scene_, &error)) {
+            // The scene on screen (if any) is unchanged: load() only replaces
+            // it when the whole file was valid.
+            ENGINE_ERROR("Could not load the scene: ", error);
+            return false;
+        }
+        ENGINE_INFO("Loaded ", ScenePath, " (", scene_.entityCount(), " entities)");
+        findSceneEntities();
+        return true;
     }
 
-    // Small helpers so the scene description below reads like a list.
-    Entity addMesh(const std::string& name, const Mesh& mesh, const Material& material, const Vec3& position,
+    void saveSceneFile() {
+        std::error_code ec;
+        std::filesystem::create_directories(std::filesystem::path(scenePath()).parent_path(), ec);
+        std::string error;
+        if (!serializer_.save(scene_, scenePath(), &error)) {
+            ENGINE_ERROR("Could not save the scene: ", error);
+            return;
+        }
+        // A new file becomes an asset with an id, like any other.
+        registry_.registerFile(ScenePath);
+        ENGINE_INFO("Saved ", ScenePath, " (", scene_.entityCount(), " entities)");
+    }
+
+    // A loaded scene is new data: find the entities the sandbox drives by
+    // name, and line the free camera and sun controls up with the file.
+    void findSceneEntities() {
+        cameraEntity_ = scene_.primaryCamera();
+        sunEntity_ = scene_.findByName("Sun");
+        orreryArm_ = scene_.findByName("Orrery Arm");
+        planet_ = scene_.findByName("Planet");
+        spawnGroup_ = scene_.findByName("Spawned");
+        if (cameraEntity_.isNull()) {
+            ENGINE_WARN("The scene has no camera; adding one");
+            cameraEntity_ = scene_.createEntity("Main Camera");
+            scene_.add<CameraComponent>(cameraEntity_);
+        }
+        if (spawnGroup_.isNull()) {
+            spawnGroup_ = scene_.createEntity("Spawned");
+        }
+        const Transform& cam = scene_.get<Transform>(cameraEntity_);
+        freeCamera_.position = cam.position;
+        freeCamera_.lookAt(cam.position + cam.rotation * Math::WorldForward);
+        if (!sunEntity_.isNull()) {
+            // Undo moveSun's rotation = yaw(azimuth) * pitch(-elevation) from the
+            // direction the light shines.
+            const Vec3 dir = scene_.get<Transform>(sunEntity_).rotation * Math::WorldForward;
+            sunElevation_ = std::asin(Math::clamp(-dir.y, -1.0f, 1.0f));
+            sunAzimuth_ = std::atan2(-dir.x, -dir.z);
+        }
+    }
+
+    // ---------------------------------------------------------------- the default scene
+    AssetId asset(const std::string& path) const {
+        const AssetId id = registry_.idForPath(path);
+        if (id.isNull()) {
+            ENGINE_WARN("Asset ", path, " is missing from ", registry_.root(), "; that part of the scene will be missing too");
+        }
+        return id;
+    }
+
+    Entity addMesh(const std::string& name, AssetId mesh, const MeshMaterial& material, const Vec3& position,
                    const Vec3& scale = Vec3(1.0f), Entity parent = NullEntity) {
         const Entity e = scene_.createEntity(name);
         if (!parent.isNull()) {
-            scene_.setParent(e, parent, false); // numbers below are relative to the parent
+            scene_.setParent(e, parent, false);
         }
         Transform& t = scene_.get<Transform>(e);
         t.position = position;
         t.scale = scale;
         MeshRenderer& mr = scene_.add<MeshRenderer>(e);
-        mr.mesh = &mesh;
+        mr.mesh = mesh;
         mr.material = material;
         return e;
     }
 
-    Material crateMaterial() const {
-        Material m;
-        m.albedo = crate_.get();
-        m.specular = 0.1f;
-        m.shininess = 16.0f;
+    MeshMaterial textured(const std::string& texturePath, float specular = 0.1f, float shininess = 16.0f) const {
+        MeshMaterial m;
+        m.albedo = asset(texturePath);
+        m.specular = specular;
+        m.shininess = shininess;
         return m;
     }
 
-    Material colored(const Vec3& color, float specular = 0.4f, float shininess = 32.0f) const {
-        Material m;
+    static MeshMaterial colored(const Vec3& color, float specular = 0.4f, float shininess = 32.0f) {
+        MeshMaterial m;
         m.baseColor = color;
         m.specular = specular;
         m.shininess = shininess;
         return m;
     }
 
-    void buildScene() {
-        // Camera and sun.
+    void buildDefaultScene() {
+        scene_ = Scene();
         cameraEntity_ = scene_.createEntity("Main Camera");
         scene_.add<CameraComponent>(cameraEntity_);
+        Transform& cam = scene_.get<Transform>(cameraEntity_);
+        cam.position = Vec3(1.0f, 3.0f, 7.0f);
+        Camera aim;
+        aim.position = cam.position;
+        aim.lookAt(Vec3(1.8f, 0.9f, -2.5f));
+        cam.rotation = aim.rotation();
+
         sunEntity_ = scene_.createEntity("Sun");
         scene_.add<LightComponent>(sunEntity_);
+        // Turned by the azimuth, tilted down by the elevation (as moveSun does).
+        scene_.get<Transform>(sunEntity_).rotation =
+            glm::angleAxis(Math::toRadians(35.0f), Math::WorldUp) * glm::angleAxis(-Math::toRadians(50.0f), Math::WorldRight);
 
-        Material ground;
-        ground.albedo = ground_.get();
-        ground.uvScale = Vec2(25.0f); // 200 m plane, 1 m squares
-        ground.specular = 0.05f;
-        addMesh("Ground", *plane_, ground, Vec3(0.0f), Vec3(200.0f, 1.0f, 200.0f));
+        MeshMaterial ground = textured("textures/checker.png", 0.05f);
+        ground.uvScale = Vec2(25.0f); // 200 m, 8 squares per repeat -> 1 m squares
+        addMesh("Ground", BuiltinAssets::Plane, ground, Vec3(0.0f), Vec3(200.0f, 1.0f, 200.0f));
 
-        // A row of crates under one empty parent entity, used like a folder.
         const Entity row = scene_.createEntity("Crate Row");
         for (int i = 0; i < 3; ++i) {
-            const Entity crate = addMesh("Crate " + std::to_string(i + 1), *cube_, crateMaterial(),
+            const Entity crate = addMesh("Crate " + std::to_string(i + 1), BuiltinAssets::Cube, textured("textures/crate.png"),
                                          Vec3(-3.0f + 3.0f * static_cast<float>(i), 0.5f, -1.0f), Vec3(1.0f), row);
-            scene_.add<Collider>(crate); // a 1 m box, the cube's size
+            scene_.add<Collider>(crate);
             scene_.add<HitHighlight>(crate);
         }
 
-        // The ball: a sphere collider that patrols through the crates.
-        ball_ = addMesh("Ball", *sphere_, colored(Vec3(0.25f, 0.5f, 1.0f), 0.6f, 64.0f), Vec3(-5.0f, 0.5f, -0.4f),
-                        Vec3(0.7f)); // z = -0.4: grazes the crates' front faces, so it stays visible
-        Collider& ballCollider = scene_.add<Collider>(ball_);
-        ballCollider.shape = ColliderShape::Sphere; // radius 0.5 x scale 0.7 = 0.35 m, the mesh's size
-        scene_.add<Patrol>(ball_, -5.0f, 5.0f, 2.0f);
+        const Entity ball = addMesh("Ball", BuiltinAssets::Sphere, colored(Vec3(0.25f, 0.5f, 1.0f), 0.6f, 64.0f),
+                                    Vec3(-5.0f, 0.5f, -0.4f), Vec3(0.7f));
+        scene_.add<Collider>(ball).shape = ColliderShape::Sphere;
+        scene_.add<Patrol>(ball, -5.0f, 5.0f, 2.0f);
+
+        // Models from files: an OBJ barrel (its origin is at its base) and a glTF rock.
+        const Entity props = scene_.createEntity("Props");
+        for (int i = 0; i < 2; ++i) {
+            const Entity barrel = addMesh("Barrel " + std::to_string(i + 1), asset("models/barrel.obj"),
+                                          textured("textures/barrel.png", 0.2f, 24.0f),
+                                          Vec3(-4.4f + 0.85f * static_cast<float>(i), 0.0f, 0.9f), Vec3(1.0f), props);
+            scene_.get<Transform>(barrel).rotation = Math::quatFromEulerDegrees(Vec3(0.0f, 40.0f * static_cast<float>(i), 0.0f));
+            Collider& c = scene_.add<Collider>(barrel);
+            c.center = Vec3(0.0f, 0.5f, 0.0f);
+            c.halfExtents = Vec3(0.4f, 0.5f, 0.4f);
+        }
+        const Entity rock = addMesh("Rock", asset("models/rock.gltf"), colored(Vec3(0.33f, 0.31f, 0.28f), 0.05f, 8.0f),
+                                    Vec3(2.4f, 0.25f, 1.8f), Vec3(1.4f), props);
+        scene_.get<Transform>(rock).rotation = Math::quatFromEulerDegrees(Vec3(0.0f, 30.0f, 0.0f));
 
         buildOrrery();
         spawnGroup_ = scene_.createEntity("Spawned");
     }
 
     void buildOrrery() {
-        // Pedestal, then a spinning arm on top. The star, planet and moon hang
-        // off the arm, so the arm's rotation carries them:
-        //
-        //   Orrery Arm   (Spin 25 deg/s)
-        //   ├─ Star
-        //   └─ Planet    (Spin 120 deg/s, 2.4 m out)
-        //      └─ Moon   (1.8 planet-units out)
-        addMesh("Pedestal", *cube_, colored(Vec3(0.35f), 0.2f), Vec3(5.5f, 0.6f, -5.0f), Vec3(0.6f, 1.2f, 0.6f));
-        const Entity arm = scene_.createEntity("Orrery Arm");
-        scene_.get<Transform>(arm).position = Vec3(5.5f, 2.0f, -5.0f);
-        scene_.add<Spin>(arm, Vec3(0.0f, 1.0f, 0.0f), 25.0f);
-        orreryArm_ = arm;
-
-        addMesh("Star", *sphere_, colored(Vec3(1.0f, 0.75f, 0.2f), 0.8f, 16.0f), Vec3(0.0f), Vec3(1.1f), arm);
-        planet_ = addMesh("Planet", *sphere_, colored(Vec3(0.2f, 0.6f, 0.9f), 0.5f, 48.0f), Vec3(2.4f, 0.0f, 0.0f),
-                          Vec3(0.5f), arm);
+        addMesh("Pedestal", BuiltinAssets::Cube, colored(Vec3(0.35f), 0.2f), Vec3(5.5f, 0.6f, -5.0f), Vec3(0.6f, 1.2f, 0.6f));
+        orreryArm_ = scene_.createEntity("Orrery Arm");
+        scene_.get<Transform>(orreryArm_).position = Vec3(5.5f, 2.0f, -5.0f);
+        scene_.add<Spin>(orreryArm_, Vec3(0.0f, 1.0f, 0.0f), 25.0f);
+        addMesh("Star", BuiltinAssets::Sphere, colored(Vec3(1.0f, 0.75f, 0.2f), 0.8f, 16.0f), Vec3(0.0f), Vec3(1.1f), orreryArm_);
+        planet_ = addMesh("Planet", BuiltinAssets::Sphere, colored(Vec3(0.2f, 0.6f, 0.9f), 0.5f, 48.0f), Vec3(2.4f, 0.0f, 0.0f),
+                          Vec3(0.5f), orreryArm_);
         scene_.add<Spin>(planet_, Vec3(0.1f, 1.0f, 0.0f), 120.0f);
-        addMesh("Moon", *sphere_, colored(Vec3(0.8f), 0.2f), Vec3(1.8f, 0.0f, 0.0f), Vec3(0.4f), planet_);
+        addMesh("Moon", BuiltinAssets::Sphere, colored(Vec3(0.8f), 0.2f), Vec3(1.8f, 0.0f, 0.0f), Vec3(0.4f), planet_);
     }
 
     // ---------------------------------------------------------------- per-frame
     void followFreeCamera() {
-        // The fly controller moves a plain Camera every frame; copy it onto the
-        // camera entity. It moves per frame, not per fixed step, so there is
-        // nothing to blend: reset the interpolation or it would lag behind.
         Transform& t = scene_.get<Transform>(cameraEntity_);
         t.position = freeCamera_.position;
         t.rotation = freeCamera_.rotation();
-        t.resetInterpolation();
+        t.resetInterpolation(); // moved per frame: nothing to blend
     }
 
     void moveSun(float dt) {
+        if (sunEntity_.isNull() || !scene_.isAlive(sunEntity_)) {
+            return;
+        }
         const Input& in = input();
         const float turn = 1.2f * dt;
         if (in.isKeyDown(Key::J)) sunAzimuth_ += turn;
@@ -294,8 +383,6 @@ private:
         if (in.isKeyDown(Key::I)) sunElevation_ += turn;
         if (in.isKeyDown(Key::K)) sunElevation_ -= turn;
         sunElevation_ = Math::clamp(sunElevation_, Math::toRadians(3.0f), Math::toRadians(89.0f));
-        // The light shines along the entity's -Z: turn it by the azimuth, then
-        // tilt it down by the elevation.
         Transform& t = scene_.get<Transform>(sunEntity_);
         t.rotation = glm::angleAxis(sunAzimuth_, Math::WorldUp) * glm::angleAxis(-sunElevation_, Math::WorldRight);
         t.resetInterpolation();
@@ -308,6 +395,9 @@ private:
         if (in.wasKeyPressed(Key::F12)) screenshotRequested_ = true;
         if (in.wasKeyPressed(Key::H)) printHelp();
         if (in.wasKeyPressed(Key::Tab)) printHierarchy();
+        if (in.wasKeyPressed(Key::A) && !flyCamera_.wantsCursorCaptured()) printAssets(); // A also strafes while flying
+        if (in.wasKeyPressed(Key::F5)) saveSceneFile();
+        if (in.wasKeyPressed(Key::F9)) loadSceneFile();
         if (in.wasKeyPressed(Key::F1)) {
             renderer_->wireframe = !renderer_->wireframe;
             ENGINE_INFO("Wireframe ", renderer_->wireframe ? "on" : "off");
@@ -331,22 +421,24 @@ private:
     }
 
     void togglePlanetParent() {
-        // keepWorldTransform = true: the planet stays exactly where it is on
-        // screen; only what it's attached to changes.
+        if (!scene_.isAlive(planet_) || !scene_.isAlive(orreryArm_)) {
+            ENGINE_INFO("This scene has no Planet and Orrery Arm to detach");
+            return;
+        }
         const bool attached = scene_.parentOf(planet_) == orreryArm_;
         scene_.setParent(planet_, attached ? NullEntity : orreryArm_);
-        ENGINE_INFO("Planet ", attached ? "detached: it stays put and stops orbiting (its moon still circles it)"
-                                         : "re-attached to the orrery arm");
+        ENGINE_INFO("Planet ", attached ? "detached: it stays put and stops orbiting" : "re-attached to the orrery arm");
     }
 
     void spawnCrate() {
         const Vec3 spot = freeCamera_.position + freeCamera_.forward() * 3.0f;
-        const Entity crate = addMesh("Spawned Crate " + std::to_string(++spawnCounter_), *cube_, crateMaterial(),
-                                     Vec3(spot.x, std::max(spot.y, 0.5f), spot.z), Vec3(0.8f), spawnGroup_);
+        const Entity crate = addMesh("Spawned Crate " + std::to_string(++spawnCounter_), BuiltinAssets::Cube,
+                                     textured("textures/crate.png"), Vec3(spot.x, std::max(spot.y, 0.5f), spot.z),
+                                     Vec3(0.8f), spawnGroup_);
         scene_.get<Transform>(crate).rotation = glm::angleAxis(freeCamera_.yaw, Math::WorldUp);
         scene_.add<Collider>(crate);
         scene_.add<HitHighlight>(crate);
-        ENGINE_INFO("Added ", scene_.nameOf(crate), " (", scene_.entityCount(), " entities)");
+        ENGINE_INFO("Added ", scene_.nameOf(crate), " (", scene_.entityCount(), " entities; F5 saves)");
     }
 
     void removeNewestCrate() {
@@ -362,10 +454,9 @@ private:
 
     void removeAllSpawned() {
         const size_t count = scene_.childrenOf(spawnGroup_).size();
-        // Destroying the group destroys every child with it.
         scene_.destroyEntity(spawnGroup_);
         spawnGroup_ = scene_.createEntity("Spawned");
-        ENGINE_INFO("Removed the Spawned group and its ", count, " crates (", scene_.entityCount(), " entities left)");
+        ENGINE_INFO("Removed the Spawned group and its ", count, " crates");
     }
 
     // ---------------------------------------------------------------- output
@@ -380,20 +471,13 @@ private:
 
     void appendTree(std::ostringstream& out, Entity e, int depth) const {
         out << std::string(static_cast<size_t>(depth) * 2, ' ') << scene_.nameOf(e);
-        // List the components beyond the three every entity has.
-        std::vector<const char*> parts;
-        if (scene_.has<MeshRenderer>(e)) parts.push_back("MeshRenderer");
-        if (scene_.has<CameraComponent>(e)) parts.push_back("Camera");
-        if (scene_.has<LightComponent>(e)) parts.push_back("Light");
-        if (scene_.has<Collider>(e)) parts.push_back("Collider");
-        if (scene_.has<Spin>(e)) parts.push_back("Spin");
-        if (scene_.has<Patrol>(e)) parts.push_back("Patrol");
-        if (!parts.empty()) {
-            out << "  [";
-            for (size_t i = 0; i < parts.size(); ++i) {
-                out << (i ? ", " : "") << parts[i];
-            }
-            out << "]";
+        if (const MeshRenderer* mr = scene_.tryGet<MeshRenderer>(e)) {
+            const AssetRecord* record = registry_.find(mr->mesh);
+            out << "  [mesh " << (record ? record->path : mr->mesh == BuiltinAssets::Cube ? "cube"
+                                                      : mr->mesh == BuiltinAssets::Sphere ? "sphere"
+                                                      : mr->mesh == BuiltinAssets::Plane  ? "plane"
+                                                                                          : "?")
+                << "]";
         }
         out << '\n';
         for (Entity child : scene_.childrenOf(e)) {
@@ -401,10 +485,21 @@ private:
         }
     }
 
+    void printAssets() const {
+        std::ostringstream out;
+        out << "Assets in " << registry_.root() << ":\n";
+        for (const AssetRecord* record : registry_.all()) {
+            out << "  " << record->id.toString() << "  " << AssetRegistry::typeName(record->type) << "  " << record->path
+                << '\n';
+        }
+        out << "Loaded: " << assets_->loadedMeshes() << " meshes, " << assets_->loadedTextures() << " textures";
+        ENGINE_INFO(out.str());
+    }
+
     void maybeTakeScreenshot(const IVec2& fb) {
         const bool lastFrame = settings().maxFrames > 0 && stats().frame + 1 == settings().maxFrames;
-        if (screenshotRequested_ || (lastFrame && !screenshotPath_.empty())) {
-            saveScreenshot(screenshotPath_.empty() ? "screenshot.png" : screenshotPath_, fb.x, fb.y);
+        if (screenshotRequested_ || (lastFrame && !options_.screenshotPath.empty())) {
+            saveScreenshot(options_.screenshotPath.empty() ? "screenshot.png" : options_.screenshotPath, fb.x, fb.y);
             screenshotRequested_ = false;
         }
     }
@@ -415,34 +510,33 @@ private:
             return;
         }
         titleTimer_ = 0.0;
-        const RenderStats& s = renderer_->stats();
         std::ostringstream title;
         title.precision(1);
-        title << std::fixed << "Xordor Sandbox  |  " << stats().fps << " FPS  |  " << scene_.entityCount()
-              << " entities, " << s.drawCalls << " draws  |  ball touches " << overlapCount_
-              << (paused_ ? "  |  PAUSED" : "");
+        title << std::fixed << "Xordor Sandbox  |  " << stats().fps << " FPS  |  " << scene_.entityCount() << " entities, "
+              << renderer_->stats().drawCalls << " draws  |  " << ScenePath << (paused_ ? "  |  PAUSED" : "");
         window().setTitle(title.str());
     }
 
     static void printHelp() {
-        ENGINE_INFO("Controls: right mouse + WASD/QE fly, J/L/I/K sun, C colliders, P pause, B detach/attach planet, "
-                    "N spawn crate, Backspace remove newest, Delete remove all spawned, Tab print hierarchy, "
-                    "R reload shaders, F1 wireframe, V vsync, F12 screenshot, Esc quits");
+        ENGINE_INFO("Controls: F5 save scene, F9 load scene, Tab hierarchy, A assets, right mouse + WASD/QE fly, "
+                    "J/L/I/K sun, C colliders, P pause, B planet, N / Backspace / Delete crates, R shaders, "
+                    "F1 wireframe, F12 screenshot, Esc quits");
     }
 
+    Options options_;
+    AssetRegistry registry_;
+    SceneSerializer serializer_;
     // GPU objects must be deleted while the OpenGL context exists. They are:
     // C++ destroys these members before the Application base class, which
-    // owns the window. The scene only points at meshes and textures, so it
-    // may be destroyed in any order relative to them.
+    // owns the window.
     std::unique_ptr<ForwardRenderer> renderer_;
     std::unique_ptr<SceneRenderer> sceneRenderer_;
-    std::unique_ptr<Mesh> cube_, plane_, sphere_;
-    std::unique_ptr<Texture> crate_, ground_;
+    std::unique_ptr<AssetManager> assets_;
     Scene scene_;
 
-    Entity cameraEntity_, sunEntity_, ball_, orreryArm_, planet_, spawnGroup_;
+    Entity cameraEntity_, sunEntity_, orreryArm_, planet_, spawnGroup_;
     Camera freeCamera_;
-    FlyCameraController flyCamera_; // moves freeCamera_ with the mouse and keys
+    FlyCameraController flyCamera_;
     float sunAzimuth_ = Math::toRadians(35.0f);
     float sunElevation_ = Math::toRadians(50.0f);
 
@@ -450,7 +544,6 @@ private:
     bool screenshotRequested_ = false;
     int overlapCount_ = 0;
     int spawnCounter_ = 0;
-    std::string screenshotPath_;
     double titleTimer_ = 0.0;
 };
 
@@ -464,8 +557,11 @@ bool parseOptions(int argc, char** argv, Options& options) {
             options.screenshotPath = argv[++i];
         } else if (arg == "--no-vsync") {
             options.vsync = false;
+        } else if (arg == "--rebuild-scene") {
+            options.rebuildScene = true;
         } else {
-            ENGINE_ERROR("Unknown option ", arg, ". Options: --frames N, --no-vsync, --screenshot FILE.png");
+            ENGINE_ERROR("Unknown option ", arg,
+                         ". Options: --frames N, --no-vsync, --screenshot FILE.png, --rebuild-scene");
             return false;
         }
     }
@@ -485,7 +581,7 @@ int main(int argc, char** argv) {
         settings.window.vsync = options.vsync;
         settings.maxFrames = options.frames;
         settings.logFile = "sandbox.log";
-        Sandbox app(settings, options.screenshotPath);
+        Sandbox app(settings, options);
         return app.run();
     } catch (const std::exception& error) {
         ENGINE_ERROR("Fatal: ", error.what());

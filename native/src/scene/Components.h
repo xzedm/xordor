@@ -9,9 +9,8 @@
 // camera or light *attached to an entity*, which takes its position and
 // direction from the entity's Transform.
 
+#include "core/AssetId.h"
 #include "core/Math.h"
-#include "render/ForwardRenderer.h" // Material
-#include "render/Mesh.h"
 #include "scene/Entity.h"
 
 #include <string>
@@ -60,12 +59,22 @@ struct Hierarchy {
     std::vector<Entity> children; // in the order they were attached
 };
 
-// Draws a mesh at the entity's transform.
+// How a surface looks. The same fields as the renderer's Material, but the
+// texture is an asset id instead of a pointer, so it can be saved to a file.
+struct MeshMaterial {
+    Vec3 baseColor{1.0f}; // linear; multiplied with the texture
+    AssetId albedo;       // a texture asset; null = plain white
+    float specular = 0.2f;
+    float shininess = 32.0f;
+    Vec2 uvScale{1.0f};
+};
+
+// Draws a mesh at the entity's transform. Both the mesh and the texture are
+// asset ids: a file in the assets folder, or one of BuiltinAssets (cube,
+// plane, sphere). The asset manager loads them the first time they're drawn.
 struct MeshRenderer {
-    // Not owned: the mesh must outlive the component. TODO(Phase 4): refer to
-    // meshes by asset id, so the asset system owns them and scenes can be saved.
-    const Mesh* mesh = nullptr;
-    Material material;
+    AssetId mesh;
+    MeshMaterial material;
     bool visible = true;
 };
 

@@ -42,7 +42,7 @@ DirectionalLight directionalLightFor(const Scene& scene, Entity light, float alp
 SceneRenderer::SceneRenderer(ForwardRenderer& renderer)
     : renderer_(renderer), debugCube_(Primitives::cube()), debugSphere_(Primitives::sphere(1.0f, 24, 12)) {}
 
-void SceneRenderer::render(const Scene& scene, float aspect, float alpha) {
+void SceneRenderer::render(const Scene& scene, RenderAssets& assets, float aspect, float alpha) {
     const Entity camera = scene.primaryCamera();
     if (camera.isNull()) {
         if (!warnedNoCamera_) {
@@ -69,9 +69,25 @@ void SceneRenderer::render(const Scene& scene, float aspect, float alpha) {
     renderer_.beginFrame(cameraViewFor(scene, camera, aspect, alpha), directionalLightFor(scene, light, alpha),
                          scene.environment.clearColor);
     scene.registry().each<MeshRenderer>([&](Entity e, const MeshRenderer& mr) {
-        if (mr.visible && mr.mesh) {
-            renderer_.submit(*mr.mesh, mr.material, scene.interpolatedWorldMatrix(e, alpha));
+        if (!mr.visible) {
+            return;
         }
+        const Mesh* mesh = assets.mesh(mr.mesh);
+        if (!mesh) {
+            // The asset manager already said why; this says which entity.
+            if (warnedMissingMesh_.insert(e).second) {
+                ENGINE_WARN(scene.nameOf(e), " isn't drawn: its mesh ", mr.mesh.toString(), " isn't available");
+            }
+            return;
+        }
+        Material material;
+        material.baseColor = mr.material.baseColor;
+        // A missing texture falls back to white (the asset manager logs it).
+        material.albedo = mr.material.albedo.isNull() ? nullptr : assets.texture(mr.material.albedo);
+        material.specular = mr.material.specular;
+        material.shininess = mr.material.shininess;
+        material.uvScale = mr.material.uvScale;
+        renderer_.submit(*mesh, material, scene.interpolatedWorldMatrix(e, alpha));
     });
     if (showColliders) {
         submitColliders(scene);

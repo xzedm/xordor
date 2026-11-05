@@ -42,11 +42,33 @@ FetchContent_Declare(stb
   GIT_TAG        db69a229ae5d89caff1d96b1af0c2a0fe0041c2b  # 2026-10-19: stb_image 2.30, stb_image_write 1.16
 )
 
-FetchContent_MakeAvailable(glfw glm stb)
+# ---------------------------------------------------------------- nlohmann/json: scene and .meta files
+# Header-only. Chosen for readable code: j["position"] = {1, 2, 3} reads like
+# the JSON it writes. (Slower than some parsers, which doesn't matter for
+# files this size.)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG        v3.11.3
+  GIT_SHALLOW    TRUE
+)
+
+# ---------------------------------------------------------------- cgltf: glTF model files
+# One header, like stb, with no CMake file; compiled once in assets/CgltfImpl.cpp.
+FetchContent_Declare(cgltf
+  GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+  GIT_TAG        v1.14
+  GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(glfw glm stb nlohmann_json cgltf)
 
 add_library(stb INTERFACE)
 # SYSTEM: warnings inside stb's headers are not ours to fix.
 target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
+add_library(cgltf INTERFACE)
+target_include_directories(cgltf SYSTEM INTERFACE ${cgltf_SOURCE_DIR})
 
 # ---------------------------------------------------------------- doctest: unit tests
 if(XE_BUILD_TESTS)

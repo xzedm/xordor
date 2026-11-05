@@ -23,10 +23,15 @@ namespace Engine {
 
 // One corner of a triangle. The layout matters: Mesh.cpp tells OpenGL where
 // each field is inside this struct (see the attribute setup there).
+// Every field starts at zero. That matters: GLM vectors are *not* zeroed by
+// default (for speed, like plain floats), so `Vertex v;` would otherwise hold
+// whatever bytes were in memory, and an importer that only fills some fields
+// would pass garbage on. (This bit the glTF importer: a file without normals
+// left random normals that looked "already set".)
 struct Vertex {
-    Vec3 position;
-    Vec3 normal; // the direction the surface faces, length 1; used for lighting
-    Vec2 uv;     // where to read the texture: (0, 0) bottom-left, (1, 1) top-right
+    Vec3 position{0.0f};
+    Vec3 normal{0.0f}; // the direction the surface faces, length 1; used for lighting
+    Vec2 uv{0.0f};     // where to read the texture: (0, 0) bottom-left, (1, 1) top-right
 };
 
 struct MeshData {

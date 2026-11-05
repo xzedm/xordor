@@ -8,6 +8,9 @@
 // Each test draws into an offscreen framebuffer rather than the window, because
 // the contents of a hidden window's own framebuffer are undefined.
 
+#include "assets/AssetManager.h"
+#include "assets/AssetRegistry.h"
+#include "core/Paths.h"
 #include "core/Window.h"
 #include "render/Camera.h"
 #include "render/ForwardRenderer.h"
@@ -104,6 +107,18 @@ public:
         return {rgba[0], rgba[1], rgba[2], rgba[3]};
     }
     Pixel center() const { return pixel(Size / 2, Size / 2); }
+};
+
+// A stand-in for the asset manager: hands out one mesh for any id. The scene
+// renderer only knows the RenderAssets interface, so tests need no files.
+class OneMeshAssets final : public RenderAssets {
+public:
+    explicit OneMeshAssets(const Mesh& mesh) : mesh_(mesh) {}
+    const Mesh* mesh(AssetId id) override { return id.isNull() ? nullptr : &mesh_; }
+    const Texture* texture(AssetId) override { return nullptr; }
+
+private:
+    const Mesh& mesh_;
 };
 
 int brightness(const Pixel& p) {
@@ -237,13 +252,14 @@ TEST_SUITE("gpu") {
         scene.get<Transform>(parent).position = Vec3(0.6f, 0.0f, 0.0f);
         const Entity box = scene.createEntity("Box");
         MeshRenderer& mr = scene.add<MeshRenderer>(box);
-        mr.mesh = &cube;
+        mr.mesh = BuiltinAssets::Cube;
         mr.material.baseColor = Vec3(1.0f, 0.0f, 0.0f);
         mr.material.specular = 0.0f;
         scene.setParent(box, parent, false);
 
+        OneMeshAssets assets(cube);
         SceneRenderer sceneRenderer(*renderer);
-        sceneRenderer.render(scene, 1.0f, 1.0f);
+        sceneRenderer.render(scene, assets, 1.0f, 1.0f);
         CHECK(renderer->stats().drawCalls == 1);
         // The cube sits right of center, so the right side is red and the far left is background.
         const Pixel right = pixel(Size / 2 + 25, Size / 2);
@@ -255,7 +271,29 @@ TEST_SUITE("gpu") {
         mr.visible = false;
         scene.add<Collider>(box);
         sceneRenderer.showColliders = true;
-        sceneRenderer.render(scene, 1.0f, 1.0f);
+        sceneRenderer.render(scene, assets, 1.0f, 1.0f);
         CHECK(renderer->stats().drawCalls == 1);
+    }
+
+    TEST_CASE_FIXTURE(GpuFixture, "the asset manager loads each asset once and shares it") {
+        AssetRegistry registry(assetDirectory());
+        registry.scan();
+        AssetManager assets(registry);
+        const AssetId barrel = registry.idForPath("models/barrel.obj");
+        const AssetId crate = registry.idForPath("textures/crate.png");
+        REQUIRE_FALSE(barrel.isNull());
+        const Mesh* first = assets.mesh(barrel);
+        REQUIRE(first);
+        CHECK(assets.mesh(barrel) == first); // cached: the same object
+        CHECK(assets.mesh(BuiltinAssets::Cube) != nullptr);
+        const Texture* texture = assets.texture(crate);
+        REQUIRE(texture);
+        CHECK(texture->width() == 128);
+        CHECK(assets.loadedMeshes() == 2);
+
+        // Unknown or wrong-type ids give nullptr (and are logged), every time.
+        CHECK(assets.mesh(AssetId::generate()) == nullptr);
+        CHECK(assets.texture(barrel) == nullptr); // a mesh isn't a texture
+        CHECK(assets.mesh(AssetId{}) == nullptr);
     }
 }

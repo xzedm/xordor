@@ -64,6 +64,14 @@ bool nearlyEqual(const Quat& a, const Quat& b, float epsilon = Epsilon);
 // then look up" behaves as expected.
 Quat quatFromEulerDegrees(const Vec3& pitchYawRollDegrees);
 
+// The reverse: Euler angles in degrees (x = pitch, y = yaw, z = roll) that
+// quatFromEulerDegrees turns back into the same rotation. Used where people
+// read and type rotations (scene files, the editor's inspector). Pitch comes
+// out in -90..90, yaw and roll in -180..180. Straight up or down (pitch
+// +-90, "gimbal lock") yaw and roll turn about the same axis, so roll is set
+// to 0 and yaw takes the whole turn.
+Vec3 eulerDegreesFromQuat(const Quat& rotation);
+
 // The model matrix of an object: scale it, then rotate it, then move it.
 // M = T * R * S, because column vectors read right to left.
 Mat4 composeTRS(const Vec3& translation, const Quat& rotation, const Vec3& scale);

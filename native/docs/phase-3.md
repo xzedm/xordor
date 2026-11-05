@@ -2,6 +2,8 @@
 
 **Status: done.** It builds, the tests pass, and the sandbox runs (checked on Linux with Mesa's software OpenGL driver: GCC 13 Debug and Clang Release builds with warnings as errors, a GCC build under AddressSanitizer and UndefinedBehaviorSanitizer, all 12 test suites including the GPU suite, and the sandbox driven with real keyboard and mouse events, including spawning, deleting and reparenting entities under the sanitizers).
 
+> **Since Phase 4:** `MeshRenderer` stores asset ids instead of pointers, and the sandbox loads this same scene from `assets/scenes/sandbox.scene.json`, with the same controls plus F5/F9 to save and load. The ECS, hierarchy and collision code below is unchanged.
+
 ![The Phase 3 sandbox: a row of crates with collider wireframes, a ball turning the crate it touches red, and an orrery](images/phase-3-sandbox.png)
 
 ## Plan
@@ -224,4 +226,4 @@ Collision runs in the fixed step on *current* positions, so results don't depend
 - **Not thread-safe.** Entities and components are created on the main thread only (noted at `nextComponentTypeId`).
 - Tested on Linux with Mesa only; the Windows and macOS commands follow the same CMake flow but weren't run here.
 
-**Next: Phase 4, assets.** GUIDs in `.meta` files, OBJ and glTF mesh import, a texture cache, and saving and loading scenes as readable JSON, so `MeshRenderer` stores asset ids instead of pointers.
+**Next: [Phase 4, assets](phase-4.md).** GUIDs in `.meta` files, OBJ and glTF mesh import, a texture cache, and saving and loading scenes as readable JSON, so `MeshRenderer` stores asset ids instead of pointers.
