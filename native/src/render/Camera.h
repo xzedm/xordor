@@ -19,6 +19,16 @@
 
 namespace Engine {
 
+// What the renderer needs to know about a camera for one frame. Anything that
+// can produce these three things can be a camera: the free-flying Camera
+// below, or a camera entity in a scene (scene/SceneRenderer.cpp).
+struct CameraView {
+    Mat4 view{1.0f};
+    Mat4 projection{1.0f};
+    Vec3 position{0.0f};
+    Mat4 viewProjection() const { return projection * view; }
+};
+
 class Camera {
 public:
     Vec3 position{0.0f, 1.5f, 5.0f};
@@ -36,6 +46,12 @@ public:
     Mat4 view() const;
     Mat4 projection() const;
     Mat4 viewProjection() const { return projection() * view(); }
+    CameraView toView() const { return {view(), projection(), position}; }
+
+    // The same orientation as a quaternion: yaw about world up, then pitch
+    // about the turned right axis. rotation() * WorldForward == forward().
+    // Lets a scene entity copy this camera's orientation.
+    Quat rotation() const;
 
     // Turns the camera to face a point.
     void lookAt(const Vec3& target);

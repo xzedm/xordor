@@ -58,6 +58,24 @@ Mat4 composeTRS(const Vec3& translation, const Quat& rotation, const Vec3& scale
     return t * r * s;
 }
 
+void decomposeTRS(const Mat4& m, Vec3& translation, Quat& rotation, Vec3& scale) {
+    // Column 3 is the translation. Columns 0..2 are the rotated axes, each
+    // stretched by its scale, so their lengths are the scale...
+    translation = Vec3(m[3]);
+    Vec3 axes[3] = {Vec3(m[0]), Vec3(m[1]), Vec3(m[2])};
+    scale = Vec3(glm::length(axes[0]), glm::length(axes[1]), glm::length(axes[2]));
+    // ...except that a mirror (negative determinant) can't be a rotation, so
+    // one axis takes the minus sign. Which one is arbitrary; we pick x.
+    if (glm::determinant(Mat3(m)) < 0.0f) {
+        scale.x = -scale.x;
+    }
+    for (int i = 0; i < 3; ++i) {
+        axes[i] = scale[i] != 0.0f ? axes[i] / scale[i] : Vec3(0.0f);
+    }
+    // Dividing out the scale leaves a pure rotation matrix.
+    rotation = glm::normalize(glm::quat_cast(Mat3(axes[0], axes[1], axes[2])));
+}
+
 Vec3 transformPoint(const Mat4& m, const Vec3& point) {
     return Vec3(m * Vec4(point, 1.0f));
 }

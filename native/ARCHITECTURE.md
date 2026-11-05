@@ -15,9 +15,9 @@ A small, Unreal-style 3D engine written to be read. Every system is the simplest
 Each folder under `src/` is a module. A module may only depend on the modules above it in this list.
 
 ```
-core/       Log, Assert, Math (GLM wrapper), Time, Input, Window, Application   (Phase 1)
+core/       Log, Assert, Math (GLM wrapper), Geometry, Time, Input, Window, App (Phases 1-3)
 render/     Shader, Mesh, Texture, Camera, ForwardRenderer                        (Phase 2)
-scene/      Scene, Entity, components, systems, collision                         (Phases 3 and 6)
+scene/      Entity, Registry, Scene, components, SceneRenderer, collision         (Phases 3 and 6)
 assets/     AssetId (GUID), AssetRegistry, importers, TextureCache, JSON I/O      (Phase 4)
 scripting/  Lua state, bindings, ScriptComponent                                  (Phase 6)
 editor/     Editor app: docking, viewport, outliner, inspector, undo/redo         (Phase 5)
@@ -50,8 +50,9 @@ sandbox/    A playground app that grows with each phase
 | core | `Application` | The main loop. Games subclass it and override `onFixedUpdate`, `onUpdate`, `onRender` |
 | render | `Shader`, `Mesh`, `Texture` | Thin RAII wrappers around OpenGL objects |
 | render | `ForwardRenderer` | Draws a list of meshes with one directional light |
-| scene | `Scene`, `Entity` | An entity is an id. Components live in per-type arrays owned by the scene |
-| scene | `Transform`, `MeshRenderer`, `Camera`, `Light`, `Collider` | Plain data structs, no virtual functions |
+| scene | `Entity`, `Registry`, `Scene` | An entity is a generational id. The registry keeps components in per-type packed arrays; the scene adds the parent-child hierarchy |
+| scene | `Transform`, `MeshRenderer`, `CameraComponent`, `LightComponent`, `Collider` | Plain data structs, no virtual functions |
+| scene | `SceneRenderer` | The only bridge between scene and renderer: turns entities into draw calls |
 | assets | `AssetRegistry` | Maps GUIDs to files on disk and loaded objects, so scenes refer to assets by id, never by path |
 | scripting | `ScriptHost` | Owns the Lua state and calls `onStart`, `onUpdate`, `onCollision` on scripts |
 | editor | `EditorApp`, `UndoStack`, panels | Edits a `Scene` through commands that can be undone |

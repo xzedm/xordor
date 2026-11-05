@@ -42,6 +42,7 @@ struct Material {
     float specular = 0.2f;
     float shininess = 32.0f;
     Vec2 uvScale{1.0f};
+    bool wireframe = false;           // draw only the edges (debug shapes such as colliders)
 };
 
 struct RenderStats {
@@ -57,7 +58,10 @@ public:
 
     void setViewport(int width, int height);
 
-    void beginFrame(const Camera& camera, const DirectionalLight& light, const Vec3& clearColor);
+    void beginFrame(const CameraView& camera, const DirectionalLight& light, const Vec3& clearColor);
+    void beginFrame(const Camera& camera, const DirectionalLight& light, const Vec3& clearColor) {
+        beginFrame(camera.toView(), light, clearColor);
+    }
     void submit(const Mesh& mesh, const Material& material, const Mat4& model);
     void endFrame();
 
@@ -67,7 +71,7 @@ public:
     // Reloads automatically when a shader file was saved (checks twice a second).
     void reloadShadersIfChanged(double frameSeconds);
 
-    bool wireframe = false;
+    bool wireframe = false; // everything as wireframe (F1 in the sandbox)
     const RenderStats& stats() const { return stats_; }
 
 private:
@@ -82,7 +86,7 @@ private:
     Shader lit_;
     Texture white_;
     std::vector<DrawItem> queue_;
-    Camera camera_;
+    CameraView camera_;
     DirectionalLight light_;
     RenderStats stats_;
     int width_ = 1;

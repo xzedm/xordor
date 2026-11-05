@@ -2,6 +2,8 @@
 
 **Status: done.** It builds, the tests pass, and the sandbox runs (checked on Linux with Mesa's software OpenGL driver: GCC 13 Debug and Clang Release builds with warnings as errors, a GCC build under AddressSanitizer and UndefinedBehaviorSanitizer, all 9 test suites including the GPU suite, and the sandbox driven with real mouse and keyboard events).
 
+> **Since Phase 3:** this scene is the `render_demo` program (`src/sandbox/render_demo.cpp`). The name `sandbox` now belongs to the Phase 3 entity scene. The commands below use the new name.
+
 ![The Phase 2 sandbox: textured crates, a spinning crate, five spheres from dull to shiny, and a squashed sphere](images/phase-2-sandbox.png)
 
 ## Plan
@@ -22,7 +24,7 @@
 | Asset paths | `core/Paths.h/.cpp` | Finds the `assets/` folder (`XORDOR_ASSETS` overrides it) |
 | Screenshots | `core/Screenshot.cpp` | Now writes PNG |
 | Math | `core/Math.h/.cpp` | Adds `normalMatrix` |
-| Sandbox | `sandbox/main.cpp` | The 3D scene below. The Phase 1 demo lives on as `timestep_demo` |
+| Sandbox | `sandbox/main.cpp` (now `render_demo.cpp`) | The 3D scene below. The Phase 1 demo lives on as `timestep_demo` |
 | Tests | `tests/*_tests.cpp` | Primitives, camera, images, shader logs, plus GPU tests that check real pixels |
 
 ## Files that changed
@@ -70,7 +72,7 @@ cd xordor\native
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug
-.\build\bin\Debug\sandbox.exe
+.\build\bin\Debug\render_demo.exe
 ```
 
 ### macOS
@@ -80,7 +82,7 @@ cd xordor/native
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build
-./build/bin/sandbox
+./build/bin/render_demo
 ```
 
 ### Linux
@@ -90,7 +92,7 @@ cd xordor/native
 cmake -S . -B build
 cmake --build build -j
 ctest --test-dir build
-./build/bin/sandbox
+./build/bin/render_demo
 ```
 
 ### GPU tests
@@ -104,7 +106,7 @@ ctest --test-dir build                       # on a desktop
 xvfb-run -a ctest --test-dir build           # Linux with no screen (apt install xvfb)
 ```
 
-### Sandbox controls and options
+### Render demo controls and options
 
 | Input | Does |
 |---|---|
@@ -116,7 +118,7 @@ xvfb-run -a ctest --test-dir build           # Linux with no screen (apt install
 | F1 | Wireframe on / off |
 | V, F12, H, Esc | Vsync, save `screenshot.png`, help, quit |
 
-Command line: `sandbox --frames 300 --no-vsync --screenshot out.png` runs 300 frames and saves the last one. The window title shows FPS, draw calls, triangles and the camera speed. `timestep_demo` is the Phase 1 demo, unchanged.
+Command line: `render_demo --frames 300 --no-vsync --screenshot out.png` runs 300 frames and saves the last one. The window title shows FPS, draw calls, triangles and the camera speed. `timestep_demo` is the Phase 1 demo, unchanged.
 
 ## How it works
 
@@ -271,4 +273,4 @@ lit (fragment shader) failed to compile:
 - **Mesa leak report.** Under LeakSanitizer, Mesa's software driver reports a few 56-byte "indirect leaks" allocated inside the driver during the first draw. None come from engine code.
 - **Tested on Linux with Mesa's llvmpipe** (OpenGL 4.5 in software). The context asked for is 4.1 core, which macOS and every desktop GPU since 2010 support, but the Windows and macOS steps weren't run here.
 
-**Next: Phase 3, scene graph and entity-component system.** A `Scene` holding entities, with `Transform` (including parent and child), `MeshRenderer`, `Camera`, `Light` and `Collider` components. The renderer will draw whatever the scene holds, and the sandbox's hand-made props move into it.
+**Next: [Phase 3, scene graph and entity-component system](phase-3.md).** A `Scene` holding entities, with `Transform` (including parent and child), `MeshRenderer`, `Camera`, `Light` and `Collider` components. The renderer will draw whatever the scene holds, and the sandbox's hand-made props move into it.

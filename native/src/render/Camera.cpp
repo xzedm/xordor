@@ -23,6 +23,10 @@ Vec3 Camera::up() const {
     return glm::cross(right(), forward());
 }
 
+Quat Camera::rotation() const {
+    return glm::angleAxis(yaw, Math::WorldUp) * glm::angleAxis(pitch, Math::WorldRight);
+}
+
 Mat4 Camera::view() const {
     return Math::lookAt(position, position + forward(), Math::WorldUp);
 }

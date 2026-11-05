@@ -36,7 +36,7 @@ void ForwardRenderer::setViewport(int width, int height) {
     height_ = height;
 }
 
-void ForwardRenderer::beginFrame(const Camera& camera, const DirectionalLight& light, const Vec3& clearColor) {
+void ForwardRenderer::beginFrame(const CameraView& camera, const DirectionalLight& light, const Vec3& clearColor) {
     camera_ = camera;
     light_ = light;
     queue_.clear();
@@ -54,7 +54,6 @@ void ForwardRenderer::beginFrame(const Camera& camera, const DirectionalLight& l
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
-    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
 
     // The clear color is written as-is, so it is in display (sRGB) space,
     // like a color picked in a paint program.
@@ -82,6 +81,8 @@ void ForwardRenderer::endFrame() {
 
     for (const DrawItem& item : queue_) {
         const Material& m = item.material;
+        // TODO(performance): group wireframe items instead of switching per draw.
+        glPolygonMode(GL_FRONT_AND_BACK, (wireframe || m.wireframe) ? GL_LINE : GL_FILL);
         (m.albedo ? *m.albedo : white_).bind(0);
         lit_.set("uBaseColor", m.baseColor);
         lit_.set("uSpecular", m.specular);

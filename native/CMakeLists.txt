@@ -37,6 +37,7 @@ add_subdirectory(third_party/glad)
 # ---------------------------------------------------------------- the engine
 add_library(XordorEngine STATIC
   src/core/Application.cpp
+  src/core/Geometry.cpp
   src/core/Input.cpp
   src/core/Log.cpp
   src/core/Math.cpp
@@ -55,6 +56,10 @@ add_library(XordorEngine STATIC
   src/render/ShaderLog.cpp
   src/render/StbImpl.cpp
   src/render/Texture.cpp
+  src/scene/Collision.cpp
+  src/scene/Registry.cpp
+  src/scene/Scene.cpp
+  src/scene/SceneRenderer.cpp
 )
 add_library(Xordor::Engine ALIAS XordorEngine)
 

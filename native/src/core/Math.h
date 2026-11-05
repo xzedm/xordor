@@ -68,6 +68,13 @@ Quat quatFromEulerDegrees(const Vec3& pitchYawRollDegrees);
 // M = T * R * S, because column vectors read right to left.
 Mat4 composeTRS(const Vec3& translation, const Quat& rotation, const Vec3& scale);
 
+// The reverse of composeTRS: splits a matrix back into translation, rotation
+// and scale. Used when an object changes parent but must stay where it is.
+// A matrix made by composeTRS comes back exactly (up to rounding). Matrices
+// with shear (a non-uniformly scaled parent with a rotated child) can't be
+// written as T*R*S at all; the result is then the closest T*R*S, not exact.
+void decomposeTRS(const Mat4& m, Vec3& translation, Quat& rotation, Vec3& scale);
+
 // Points are affected by translation; directions (w = 0) are not.
 Vec3 transformPoint(const Mat4& m, const Vec3& point);
 Vec3 transformDirection(const Mat4& m, const Vec3& direction);

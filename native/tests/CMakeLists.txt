@@ -2,11 +2,14 @@
 add_executable(engine_tests
   test_main.cpp
   camera_tests.cpp
+  ecs_tests.cpp
+  geometry_tests.cpp
   image_tests.cpp
   input_tests.cpp
   log_tests.cpp
   math_tests.cpp
   primitives_tests.cpp
+  scene_tests.cpp
   shader_log_tests.cpp
   time_tests.cpp
 )
@@ -14,7 +17,7 @@ target_link_libraries(engine_tests PRIVATE Xordor::Engine doctest::doctest)
 xe_set_warnings(engine_tests)
 
 # Each test file shows up as its own entry in `ctest`, so a failure names the module.
-foreach(suite camera image input log math primitives shaderlog time)
+foreach(suite camera ecs geometry image input log math primitives scene shaderlog time)
   add_test(NAME ${suite} COMMAND engine_tests --test-suite=${suite})
 endforeach()
 

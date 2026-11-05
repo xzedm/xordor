@@ -100,4 +100,22 @@ TEST_CASE("normalMatrix keeps normals perpendicular under non-uniform scale") {
     CHECK(Math::nearlyEqual(Mat4(Math::normalMatrix(turn)), Mat4(Mat3(turn)), 1e-5f));
 }
 
+TEST_CASE("decomposeTRS undoes composeTRS") {
+    const Vec3 t(1.0f, -2.0f, 3.5f);
+    const Quat r = Math::quatFromEulerDegrees(Vec3(20.0f, -75.0f, 10.0f));
+    const Vec3 s(2.0f, 0.5f, 1.5f);
+    Vec3 t2;
+    Quat r2;
+    Vec3 s2;
+    Math::decomposeTRS(Math::composeTRS(t, r, s), t2, r2, s2);
+    CHECK(Math::nearlyEqual(t2, t));
+    CHECK(Math::nearlyEqual(s2, s, 1e-5f));
+    CHECK(Math::nearlyEqual(r2, r, 1e-5f));
+
+    // A mirrored matrix (negative scale) still rebuilds the same matrix.
+    const Mat4 mirrored = Math::composeTRS(t, r, Vec3(-1.0f, 1.0f, 1.0f));
+    Math::decomposeTRS(mirrored, t2, r2, s2);
+    CHECK(Math::nearlyEqual(Math::composeTRS(t2, r2, s2), mirrored, 1e-5f));
+}
+
 } // TEST_SUITE

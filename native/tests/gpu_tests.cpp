@@ -16,6 +16,8 @@
 #include "render/Primitives.h"
 #include "render/Shader.h"
 #include "render/Texture.h"
+#include "scene/Scene.h"
+#include "scene/SceneRenderer.h"
 
 #include <doctest/doctest.h>
 #include <glad/gl.h>
@@ -218,5 +220,42 @@ TEST_SUITE("gpu") {
         CHECK(error.find("broken (fragment shader) failed to compile") != std::string::npos);
         // The annotation repeats the failing line (exact wording varies by driver).
         CHECK(error.find("3 | void main() { color = vec4(notDeclared); }") != std::string::npos);
+    }
+
+    TEST_CASE_FIXTURE(GpuFixture, "a scene draws its mesh entities through its camera entity") {
+        const Mesh cube(Primitives::cube());
+        Scene scene;
+        scene.environment.clearColor = clear;
+        const Entity cam = scene.createEntity("Camera");
+        scene.add<CameraComponent>(cam);
+        scene.get<Transform>(cam).position = Vec3(0.0f, 0.0f, 3.0f);
+        const Entity sun = scene.createEntity("Sun");
+        scene.add<LightComponent>(sun).color = Vec3(1.0f); // default rotation: shines down -Z, at the cube's front
+
+        // A red cube as the child of a parent moved 0.6 m right.
+        const Entity parent = scene.createEntity("Parent");
+        scene.get<Transform>(parent).position = Vec3(0.6f, 0.0f, 0.0f);
+        const Entity box = scene.createEntity("Box");
+        MeshRenderer& mr = scene.add<MeshRenderer>(box);
+        mr.mesh = &cube;
+        mr.material.baseColor = Vec3(1.0f, 0.0f, 0.0f);
+        mr.material.specular = 0.0f;
+        scene.setParent(box, parent, false);
+
+        SceneRenderer sceneRenderer(*renderer);
+        sceneRenderer.render(scene, 1.0f, 1.0f);
+        CHECK(renderer->stats().drawCalls == 1);
+        // The cube sits right of center, so the right side is red and the far left is background.
+        const Pixel right = pixel(Size / 2 + 25, Size / 2);
+        CHECK(right[0] > 200);
+        CHECK(right[1] < 30);
+        CHECK(pixel(8, Size / 2)[0] == doctest::Approx(64).epsilon(0.02));
+
+        // Hidden entities aren't drawn; colliders add wireframe draws when shown.
+        mr.visible = false;
+        scene.add<Collider>(box);
+        sceneRenderer.showColliders = true;
+        sceneRenderer.render(scene, 1.0f, 1.0f);
+        CHECK(renderer->stats().drawCalls == 1);
     }
 }
