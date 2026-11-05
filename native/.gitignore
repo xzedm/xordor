@@ -1,0 +1,14 @@
+# CMake build folders
+build/
+build-*/
+out/
+# Files the demos write (screenshots default to the folder they run in)
+*.log
+*.ppm
+screenshot.png
+# IDE folders
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
+editor_layout.ini

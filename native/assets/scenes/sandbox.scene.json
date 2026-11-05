@@ -1,0 +1,436 @@
+{
+  "format": "xordor-scene",
+  "version": 1,
+  "environment": {
+    "clearColor": [0.47, 0.62, 0.8],
+    "skyAmbient": [0.2, 0.24, 0.32],
+    "groundAmbient": [0.1, 0.09, 0.08]
+  },
+  "entities": [
+    {
+      "id": 1,
+      "name": "Main Camera",
+      "transform": {
+        "position": [1.0, 3.0, 7.0],
+        "rotation": [-12.4223, -4.8136, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "camera": {
+        "fovDegrees": 60.0,
+        "near": 0.05,
+        "far": 500.0,
+        "primary": true
+      }
+    },
+    {
+      "id": 2,
+      "name": "Sun",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [-50.0, 35.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "light": {
+        "color": [1.0, 0.95, 0.88],
+        "intensity": 1.0
+      }
+    },
+    {
+      "id": 3,
+      "name": "Ground",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [200.0, 1.0, 200.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000002",
+          "path": "builtin:plane"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "f20b2d7c-aa8f-412f-bc62-937eeab06309",
+            "path": "textures/checker.png"
+          },
+          "specular": 0.05,
+          "shininess": 16.0,
+          "uvScale": [25.0, 25.0]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Crate Row",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "id": 5,
+      "name": "Crate 1",
+      "parent": 4,
+      "transform": {
+        "position": [-3.0, 0.5, -1.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "path": "builtin:cube"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "f00b40e2-f426-49c0-a567-303059571361",
+            "path": "textures/crate.png"
+          },
+          "specular": 0.1,
+          "shininess": 16.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "box",
+        "halfExtents": [0.5, 0.5, 0.5],
+        "radius": 0.5,
+        "center": [0.0, 0.0, 0.0]
+      },
+      "hitHighlight": {
+        "normalColor": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "id": 6,
+      "name": "Crate 2",
+      "parent": 4,
+      "transform": {
+        "position": [0.0, 0.5, -1.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "path": "builtin:cube"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "f00b40e2-f426-49c0-a567-303059571361",
+            "path": "textures/crate.png"
+          },
+          "specular": 0.1,
+          "shininess": 16.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "box",
+        "halfExtents": [0.5, 0.5, 0.5],
+        "radius": 0.5,
+        "center": [0.0, 0.0, 0.0]
+      },
+      "hitHighlight": {
+        "normalColor": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "id": 7,
+      "name": "Crate 3",
+      "parent": 4,
+      "transform": {
+        "position": [3.0, 0.5, -1.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "path": "builtin:cube"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "f00b40e2-f426-49c0-a567-303059571361",
+            "path": "textures/crate.png"
+          },
+          "specular": 0.1,
+          "shininess": 16.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "box",
+        "halfExtents": [0.5, 0.5, 0.5],
+        "radius": 0.5,
+        "center": [0.0, 0.0, 0.0]
+      },
+      "hitHighlight": {
+        "normalColor": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "id": 8,
+      "name": "Ball",
+      "transform": {
+        "position": [-5.0, 0.5, -0.4],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [0.7, 0.7, 0.7]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "path": "builtin:sphere"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [0.25, 0.5, 1.0],
+          "albedo": null,
+          "specular": 0.6,
+          "shininess": 64.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "sphere",
+        "halfExtents": [0.5, 0.5, 0.5],
+        "radius": 0.5,
+        "center": [0.0, 0.0, 0.0]
+      },
+      "patrol": {
+        "minX": -5.0,
+        "maxX": 5.0,
+        "speed": 2.0
+      }
+    },
+    {
+      "id": 9,
+      "name": "Props",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "id": 10,
+      "name": "Barrel 1",
+      "parent": 9,
+      "transform": {
+        "position": [-4.4, 0.0, 0.9],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "e6a718e7-8488-4f51-b644-b368998b7ad2",
+          "path": "models/barrel.obj"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "dd43a532-7693-4731-a1e3-a3be7558841e",
+            "path": "textures/barrel.png"
+          },
+          "specular": 0.2,
+          "shininess": 24.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "box",
+        "halfExtents": [0.4, 0.5, 0.4],
+        "radius": 0.5,
+        "center": [0.0, 0.5, 0.0]
+      }
+    },
+    {
+      "id": 11,
+      "name": "Barrel 2",
+      "parent": 9,
+      "transform": {
+        "position": [-3.55, 0.0, 0.9],
+        "rotation": [0.0, 40.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "e6a718e7-8488-4f51-b644-b368998b7ad2",
+          "path": "models/barrel.obj"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 1.0, 1.0],
+          "albedo": {
+            "id": "dd43a532-7693-4731-a1e3-a3be7558841e",
+            "path": "textures/barrel.png"
+          },
+          "specular": 0.2,
+          "shininess": 24.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "collider": {
+        "shape": "box",
+        "halfExtents": [0.4, 0.5, 0.4],
+        "radius": 0.5,
+        "center": [0.0, 0.5, 0.0]
+      }
+    },
+    {
+      "id": 12,
+      "name": "Rock",
+      "parent": 9,
+      "transform": {
+        "position": [2.4, 0.25, 1.8],
+        "rotation": [0.0, 30.0, 0.0],
+        "scale": [1.4, 1.4, 1.4]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "bcc6a4a2-e0ff-4ef7-91ae-4c76216d7609",
+          "path": "models/rock.gltf"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [0.33, 0.31, 0.28],
+          "albedo": null,
+          "specular": 0.05,
+          "shininess": 8.0,
+          "uvScale": [1.0, 1.0]
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "Pedestal",
+      "transform": {
+        "position": [5.5, 0.6, -5.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [0.6, 1.2, 0.6]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000001",
+          "path": "builtin:cube"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [0.35, 0.35, 0.35],
+          "albedo": null,
+          "specular": 0.2,
+          "shininess": 32.0,
+          "uvScale": [1.0, 1.0]
+        }
+      }
+    },
+    {
+      "id": 14,
+      "name": "Orrery Arm",
+      "transform": {
+        "position": [5.5, 2.0, -5.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "spin": {
+        "axis": [0.0, 1.0, 0.0],
+        "degreesPerSecond": 25.0
+      }
+    },
+    {
+      "id": 15,
+      "name": "Star",
+      "parent": 14,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.1, 1.1, 1.1]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "path": "builtin:sphere"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [1.0, 0.75, 0.2],
+          "albedo": null,
+          "specular": 0.8,
+          "shininess": 16.0,
+          "uvScale": [1.0, 1.0]
+        }
+      }
+    },
+    {
+      "id": 16,
+      "name": "Planet",
+      "parent": 14,
+      "transform": {
+        "position": [2.4, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [0.5, 0.5, 0.5]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "path": "builtin:sphere"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [0.2, 0.6, 0.9],
+          "albedo": null,
+          "specular": 0.5,
+          "shininess": 48.0,
+          "uvScale": [1.0, 1.0]
+        }
+      },
+      "spin": {
+        "axis": [0.1, 1.0, 0.0],
+        "degreesPerSecond": 120.0
+      }
+    },
+    {
+      "id": 17,
+      "name": "Moon",
+      "parent": 16,
+      "transform": {
+        "position": [1.8, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [0.4, 0.4, 0.4]
+      },
+      "meshRenderer": {
+        "mesh": {
+          "id": "00000000-0000-0000-0000-000000000003",
+          "path": "builtin:sphere"
+        },
+        "visible": true,
+        "material": {
+          "baseColor": [0.8, 0.8, 0.8],
+          "albedo": null,
+          "specular": 0.2,
+          "shininess": 32.0,
+          "uvScale": [1.0, 1.0]
+        }
+      }
+    },
+    {
+      "id": 18,
+      "name": "Spawned",
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0],
+        "scale": [1.0, 1.0, 1.0]
+      }
+    }
+  ]
+}
