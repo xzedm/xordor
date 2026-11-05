@@ -56,7 +56,7 @@ sandbox/    A playground app that grows with each phase
 | assets | `AssetRegistry`, `AssetManager` | The registry maps GUIDs (kept in `.meta` files) to files; the manager loads each asset once and shares it. Scenes refer to assets by id, never by path |
 | assets | `SceneSerializer` | Scenes to and from readable JSON; apps register their own components |
 | scripting | `ScriptHost` | Owns the Lua state and calls `onStart`, `onUpdate`, `onCollision` on scripts |
-| editor | `EditorApp`, `UndoStack`, panels | Edits a `Scene` through commands that can be undone |
+| editor | `EditorApp`, `UndoStack`, `Gizmo`, panels | Edits a `Scene` through commands that can be undone; the inspector is generated from component JSON |
 
 ## How one frame flows from input to pixels
 
@@ -106,7 +106,7 @@ A custom language would teach parsing, not engines, and would take longer than e
 | stb_image | Textures | 2 |
 | cgltf (+ our own OBJ reader) | glTF / OBJ meshes. Chosen over Assimp: two formats don't justify a million-line dependency | 4 |
 | nlohmann/json | Scene and asset files | 4 |
-| Dear ImGui (docking), ImGuizmo | Editor UI and gizmos | 5 |
+| Dear ImGui (docking) | Editor UI (gizmos are our own, on the engine's ray math) | 5 |
 | Lua 5.4, sol2 | Scripting | 6 |
 | miniaudio | Sound (optional) | later |
 

@@ -64,6 +64,9 @@ public:
 
     bool shouldClose() const;
     void requestClose();
+    // Undo a close request (the close button was clicked), for example to ask
+    // "save changes?" first.
+    void cancelClose();
 
     void setTitle(const std::string& title);
     void setVSync(bool enabled);
@@ -78,6 +81,11 @@ public:
     // reports window coordinates.
     IVec2 framebufferSize() const;
     IVec2 windowSize() const;
+
+    // The underlying GLFW window, for libraries that need it (the editor's
+    // Dear ImGui backend). Everything else should use the functions above, so
+    // GLFW stays an implementation detail of this one class.
+    GLFWwindow* glfwHandle() const { return handle_.get(); }
 
 private:
     struct GlfwWindowDeleter {

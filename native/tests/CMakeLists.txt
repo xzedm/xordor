@@ -18,6 +18,12 @@ add_executable(engine_tests
 )
 target_link_libraries(engine_tests PRIVATE Xordor::Engine doctest::doctest)
 xe_set_warnings(engine_tests)
+if(XE_BUILD_EDITOR)
+  # The editor's commands, gizmo math and field hints are tested here too.
+  target_sources(engine_tests PRIVATE editor_tests.cpp)
+  target_link_libraries(engine_tests PRIVATE Xordor::Editor)
+  add_test(NAME editor COMMAND engine_tests --test-suite=editor)
+endif()
 
 # Each test file shows up as its own entry in `ctest`, so a failure names the module.
 foreach(suite assets camera ecs geometry image input log math models primitives scene serializer shaderlog time)

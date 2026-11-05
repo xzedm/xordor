@@ -135,15 +135,72 @@ void SceneSerializer::registerBuiltins() {
         });
 }
 
+// ---------------------------------------------------------------- one component
+
+const SceneSerializer::Handler* SceneSerializer::findHandler(const std::string& key) const {
+    for (const Handler& h : components_) {
+        if (h.key == key) return &h;
+    }
+    return nullptr;
+}
+
+std::vector<std::string> SceneSerializer::componentKeys() const {
+    std::vector<std::string> keys;
+    for (const Handler& h : components_) keys.push_back(h.key);
+    return keys;
+}
+
+std::vector<std::string> SceneSerializer::componentKeysOf(const Scene& scene, Entity e) const {
+    std::vector<std::string> keys;
+    if (!scene.isAlive(e)) return keys;
+    for (const Handler& h : components_) {
+        if (h.has(scene, e)) keys.push_back(h.key);
+    }
+    if (const auto* raw = scene.tryGet<UnregisteredComponents>(e)) {
+        for (const auto& item : raw->values.items()) keys.push_back(item.key());
+    }
+    return keys;
+}
+
+bool SceneSerializer::hasComponent(const Scene& scene, Entity e, const std::string& key) const {
+    if (!scene.isAlive(e)) return false;
+    if (const Handler* h = findHandler(key)) return h->has(scene, e);
+    const auto* raw = scene.tryGet<UnregisteredComponents>(e);
+    return raw && raw->values.contains(key);
+}
+
+Json SceneSerializer::saveComponent(const Scene& scene, Entity e, const std::string& key) const {
+    if (!hasComponent(scene, e, key)) return nullptr;
+    if (const Handler* h = findHandler(key)) return h->save(scene, e);
+    return scene.get<UnregisteredComponents>(e).values[key];
+}
+
+void SceneSerializer::loadComponent(Scene& scene, Entity e, const std::string& key, const Json& value) const {
+    if (const Handler* h = findHandler(key)) {
+        h->load(scene, e, value);
+        return;
+    }
+    if (!scene.has<UnregisteredComponents>(e)) scene.add<UnregisteredComponents>(e);
+    scene.get<UnregisteredComponents>(e).values[key] = value;
+}
+
+void SceneSerializer::removeComponent(Scene& scene, Entity e, const std::string& key) const {
+    if (const Handler* h = findHandler(key)) {
+        h->remove(scene, e);
+    } else if (auto* raw = scene.tryGet<UnregisteredComponents>(e)) {
+        raw->values.erase(key);
+        if (raw->values.empty()) scene.remove<UnregisteredComponents>(e);
+    }
+}
+
 // ---------------------------------------------------------------- saving
 
 Json SceneSerializer::toJson(const Scene& scene) const {
     Json entities = Json::array();
-    int nextId = 1;
     // Depth first from the roots: parents come before their children, and
     // children keep their order, which keeps files stable between saves.
     for (Entity root : scene.roots()) {
-        appendEntity(scene, root, 0, nextId, entities);
+        appendTree(scene, root, entities);
     }
     const SceneEnvironment& env = scene.environment;
     return Json{{"format", "xordor-scene"},
@@ -155,22 +212,39 @@ Json SceneSerializer::toJson(const Scene& scene) const {
                 {"entities", std::move(entities)}};
 }
 
-void SceneSerializer::appendEntity(const Scene& scene, Entity e, int parentFileId, int& nextId, Json& entities) const {
-    const int id = nextId++;
+Json SceneSerializer::entityJson(const Scene& scene, Entity e) const {
     // Json is ordered_json, so keys appear in the file in this order.
-    Json entry = {{"id", id}, {"name", scene.nameOf(e)}};
-    if (parentFileId != 0) {
-        entry["parent"] = parentFileId;
+    Json entry = {{"id", scene.idOf(e)}, {"name", scene.nameOf(e)}};
+    const Entity parent = scene.parentOf(e);
+    if (!parent.isNull()) {
+        entry["parent"] = scene.idOf(parent);
     }
     for (const Handler& handler : components_) {
         if (handler.has(scene, e)) {
             entry[handler.key] = handler.save(scene, e);
         }
     }
-    entities.push_back(std::move(entry));
-    for (Entity child : scene.childrenOf(e)) {
-        appendEntity(scene, child, id, nextId, entities);
+    if (const auto* raw = scene.tryGet<UnregisteredComponents>(e)) {
+        for (const auto& item : raw->values.items()) {
+            entry[item.key()] = item.value(); // written back exactly as read
+        }
     }
+    return entry;
+}
+
+void SceneSerializer::appendTree(const Scene& scene, Entity e, Json& entities) const {
+    entities.push_back(entityJson(scene, e));
+    for (Entity child : scene.childrenOf(e)) {
+        appendTree(scene, child, entities);
+    }
+}
+
+Json SceneSerializer::saveEntityTree(const Scene& scene, Entity root) const {
+    Json entities = Json::array();
+    if (scene.isAlive(root)) {
+        appendTree(scene, root, entities);
+    }
+    return entities;
 }
 
 bool SceneSerializer::save(const Scene& scene, const std::string& path, std::string* error) const {
@@ -185,11 +259,96 @@ bool SceneSerializer::save(const Scene& scene, const std::string& path, std::str
 
 // ---------------------------------------------------------------- loading
 
+std::vector<Entity> SceneSerializer::createEntities(Scene& scene, const Json& entities, bool keepIds, bool warn) const {
+    if (!entities.is_array()) {
+        throw JsonError("\"entities\" should be an array");
+    }
+    // Pass 1: create every entity and its components, remembering file ids.
+    std::vector<Entity> created;
+    // If anything below throws, remove what was already made, so a caller
+    // working on a live scene never sees half a subtree.
+    struct Cleanup {
+        Scene& scene;
+        std::vector<Entity>& created;
+        bool done = false;
+        ~Cleanup() {
+            if (!done) {
+                for (Entity e : created) scene.destroyEntity(e);
+            }
+        }
+    } cleanup{scene, created};
+    std::unordered_map<SceneId, Entity> byFileId;
+    std::vector<std::pair<Entity, SceneId>> parentLinks; // (entity, parent's file id)
+    std::set<std::string> unknownKeys;
+    for (const Json& entry : entities) {
+        const SceneId fileId = readUInt64(entry, "id", 0);
+        const std::string name = readString(entry, "name", "Entity");
+        const std::string where = "entity " + std::to_string(fileId) + " (\"" + name + "\")";
+        if (fileId == 0 || byFileId.count(fileId)) {
+            throw JsonError(where + ": every entity needs a unique positive \"id\"");
+        }
+        const Entity e = keepIds ? scene.createEntityWithId(name, fileId) : scene.createEntity(name);
+        if (e.isNull()) {
+            throw JsonError(where + ": the id is already used in this scene");
+        }
+        created.push_back(e);
+        byFileId[fileId] = e;
+        if (entry.contains("parent")) {
+            parentLinks.emplace_back(e, readUInt64(entry, "parent", 0));
+        }
+        for (const auto& item : entry.items()) {
+            // Plain variables, not a structured binding: C++17 doesn't let
+            // a lambda capture structured bindings.
+            const std::string key = item.key();
+            if (key == "id" || key == "name" || key == "parent") {
+                continue;
+            }
+            const Handler* handler = findHandler(key);
+            if (!handler) {
+                unknownKeys.insert(key);
+                if (!scene.has<UnregisteredComponents>(e)) scene.add<UnregisteredComponents>(e);
+                scene.get<UnregisteredComponents>(e).values[key] = item.value();
+                continue;
+            }
+            try {
+                handler->load(scene, e, item.value());
+            } catch (const JsonError& error) {
+                throw JsonError(where + ", \"" + key + "\": " + error.what());
+            }
+        }
+    }
+
+    // Pass 2: parents, once every entity exists, so a hand-edited file may
+    // list a child before its parent.
+    for (const auto& [child, parentId] : parentLinks) {
+        auto parent = byFileId.find(parentId);
+        Entity target = parent != byFileId.end() ? parent->second : (keepIds ? scene.findById(parentId) : NullEntity);
+        if (target.isNull()) {
+            if ((parent == byFileId.end() && !keepIds) || !warn) {
+                continue; // a duplicated subtree's root (the caller places it), or a dry run
+            }
+            ENGINE_WARN("Scene: ", scene.nameOf(child), " names parent ", parentId,
+                        ", which doesn't exist; keeping it at the top level");
+            continue;
+        }
+        // The file stores local transforms, so keep them as they are.
+        scene.setParent(child, target, false);
+    }
+    for (const std::string& key : warn ? unknownKeys : std::set<std::string>{}) {
+        ENGINE_INFO("Scene: kept \"", key, "\" components as plain JSON (no serializer is registered for that key)");
+    }
+    // Loaded transforms are where things *are*: nothing to blend from.
+    for (Entity e : created) {
+        scene.get<Transform>(e).resetInterpolation();
+    }
+    cleanup.done = true;
+    return created;
+}
+
 bool SceneSerializer::fromJson(const Json& document, Scene& out, std::string* error) const {
     // Everything is built in a separate scene and only moved into `out` at
     // the end, so a file with an error halfway through changes nothing.
     Scene scene;
-    std::string where = "the document";
     try {
         if (!document.is_object() || readString(document, "format", "") != "xordor-scene") {
             throw JsonError("not a scene file (expected \"format\": \"xordor-scene\")");
@@ -200,75 +359,55 @@ bool SceneSerializer::fromJson(const Json& document, Scene& out, std::string* er
                             std::to_string(FormatVersion) + ")");
         }
         if (document.contains("environment")) {
-            where = "\"environment\"";
             const Json& env = document["environment"];
-            scene.environment.clearColor = readVec3(env, "clearColor", scene.environment.clearColor);
-            scene.environment.skyAmbient = readVec3(env, "skyAmbient", scene.environment.skyAmbient);
-            scene.environment.groundAmbient = readVec3(env, "groundAmbient", scene.environment.groundAmbient);
+            try {
+                scene.environment.clearColor = readVec3(env, "clearColor", scene.environment.clearColor);
+                scene.environment.skyAmbient = readVec3(env, "skyAmbient", scene.environment.skyAmbient);
+                scene.environment.groundAmbient = readVec3(env, "groundAmbient", scene.environment.groundAmbient);
+            } catch (const JsonError& e) {
+                throw JsonError(std::string("\"environment\": ") + e.what());
+            }
         }
-        if (!document.contains("entities") || !document["entities"].is_array()) {
+        if (!document.contains("entities")) {
             throw JsonError("\"entities\" should be an array");
         }
-
-        // Pass 1: create every entity and its components, remembering file ids.
-        std::unordered_map<int, Entity> byFileId;
-        std::vector<std::pair<Entity, int>> parentLinks; // (entity, parent file id)
-        std::set<std::string> unknownKeys;
-        for (const Json& entry : document["entities"]) {
-            const int fileId = static_cast<int>(readFloat(entry, "id", 0.0f));
-            const std::string name = readString(entry, "name", "Entity");
-            where = "entity " + std::to_string(fileId) + " (\"" + name + "\")";
-            if (fileId <= 0 || byFileId.count(fileId)) {
-                throw JsonError("every entity needs a unique positive \"id\"");
-            }
-            const Entity e = scene.createEntity(name);
-            byFileId[fileId] = e;
-            if (entry.contains("parent")) {
-                parentLinks.emplace_back(e, static_cast<int>(readFloat(entry, "parent", 0.0f)));
-            }
-            for (const auto& item : entry.items()) {
-                // Plain variables, not a structured binding: C++17 doesn't let
-                // a lambda (the find_if below) capture structured bindings.
-                const std::string key = item.key();
-                const Json& value = item.value();
-                if (key == "id" || key == "name" || key == "parent") {
-                    continue;
-                }
-                const auto handler = std::find_if(components_.begin(), components_.end(),
-                                                  [&](const Handler& h) { return h.key == key; });
-                if (handler == components_.end()) {
-                    unknownKeys.insert(key);
-                    continue;
-                }
-                where = "entity " + std::to_string(fileId) + " (\"" + name + "\"), \"" + key + "\"";
-                handler->load(scene, e, value);
-            }
-        }
-
-        // Pass 2: parents. Done after every entity exists, so a hand-edited
-        // file may list a child before its parent.
-        where = "the parent links";
-        for (const auto& [child, parentId] : parentLinks) {
-            const auto parent = byFileId.find(parentId);
-            if (parent == byFileId.end()) {
-                ENGINE_WARN("Scene: ", scene.nameOf(child), " names parent ", parentId,
-                            ", which doesn't exist; keeping it at the top level");
-                continue;
-            }
-            // The file stores local transforms, so keep them as they are.
-            scene.setParent(child, parent->second, false);
-        }
-        for (const std::string& key : unknownKeys) {
-            ENGINE_WARN("Scene: skipped \"", key, "\" components: no serializer is registered for that key");
-        }
+        createEntities(scene, document["entities"], true);
     } catch (const std::exception& e) {
-        if (error) *error = "In " + where + ": " + e.what();
+        if (error) *error = e.what();
         return false;
     }
-    // Loaded transforms are where things *are*: nothing to blend from.
-    scene.registry().each<Transform>([](Entity, Transform& t) { t.resetInterpolation(); });
     out = std::move(scene);
     return true;
+}
+
+Entity SceneSerializer::loadEntityTree(Scene& scene, const Json& entities, bool keepIds, Entity parent,
+                                       std::string* error) const {
+    // Build in a scratch scene first, so bad data leaves the real scene alone,
+    // then build again for real. (Simple rather than fast: subtrees are small.)
+    try {
+        Scene scratch;
+        createEntities(scratch, entities, true, false);
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        return NullEntity;
+    }
+    std::vector<Entity> created;
+    try {
+        created = createEntities(scene, entities, keepIds);
+    } catch (const std::exception& e) {
+        // Only possible with keepIds (an id already taken in this scene);
+        // createEntities has removed what it made.
+        if (error) *error = e.what();
+        return NullEntity;
+    }
+    if (created.empty()) {
+        return NullEntity;
+    }
+    const Entity root = created.front();
+    if (!parent.isNull() || !keepIds) {
+        scene.setParent(root, parent, false);
+    }
+    return root;
 }
 
 bool SceneSerializer::load(const std::string& path, Scene& out, std::string* error) const {

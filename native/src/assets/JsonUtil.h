@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 
@@ -43,6 +44,8 @@ std::string prettyJson(const Json& value);
 // Each read*() returns `fallback` when the key is missing (or null).
 float readFloat(const Json& object, const char* key, float fallback);
 bool readBool(const Json& object, const char* key, bool fallback);
+// A whole number >= 0 (ids). Reading it as a float would lose digits past 2^24.
+std::uint64_t readUInt64(const Json& object, const char* key, std::uint64_t fallback);
 std::string readString(const Json& object, const char* key, const std::string& fallback);
 Vec2 readVec2(const Json& object, const char* key, const Vec2& fallback);
 Vec3 readVec3(const Json& object, const char* key, const Vec3& fallback);

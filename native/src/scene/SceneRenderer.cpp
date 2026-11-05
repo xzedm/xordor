@@ -4,6 +4,8 @@
 #include "render/Primitives.h"
 #include "scene/Collision.h"
 
+#include <limits>
+
 namespace Engine {
 
 CameraView cameraViewFor(const Scene& scene, Entity camera, float aspect, float alpha) {
@@ -54,7 +56,10 @@ void SceneRenderer::render(const Scene& scene, RenderAssets& assets, float aspec
         renderer_.endFrame();
         return;
     }
+    renderView(scene, assets, cameraViewFor(scene, camera, aspect, alpha), alpha);
+}
 
+void SceneRenderer::renderView(const Scene& scene, RenderAssets& assets, const CameraView& view, float alpha) {
     Entity light;
     scene.registry().each<LightComponent>([&](Entity e, const LightComponent&) {
         if (light.isNull()) {
@@ -66,8 +71,7 @@ void SceneRenderer::render(const Scene& scene, RenderAssets& assets, float aspec
         warnedNoLight_ = true;
     }
 
-    renderer_.beginFrame(cameraViewFor(scene, camera, aspect, alpha), directionalLightFor(scene, light, alpha),
-                         scene.environment.clearColor);
+    renderer_.beginFrame(view, directionalLightFor(scene, light, alpha), scene.environment.clearColor);
     scene.registry().each<MeshRenderer>([&](Entity e, const MeshRenderer& mr) {
         if (!mr.visible) {
             return;
@@ -92,7 +96,83 @@ void SceneRenderer::render(const Scene& scene, RenderAssets& assets, float aspec
     if (showColliders) {
         submitColliders(scene);
     }
+    if (showIcons) {
+        submitIcons(scene, assets);
+    }
+    if (!selected.isNull() && scene.isAlive(selected)) {
+        submitSelection(scene, assets);
+    }
     renderer_.endFrame();
+}
+
+namespace {
+
+Material wireMaterial(const Vec3& color) {
+    Material m;
+    m.baseColor = color;
+    m.wireframe = true;
+    m.specular = 0.0f;
+    return m;
+}
+
+constexpr float IconRadius = 0.25f; // also the size picking uses for icons
+
+} // namespace
+
+Aabb pickBounds(const Scene& scene, RenderAssets& assets, Entity e, bool* isIcon) {
+    if (isIcon) *isIcon = false;
+    const Mat4 world = scene.worldMatrix(e);
+    if (const MeshRenderer* mr = scene.tryGet<MeshRenderer>(e)) {
+        if (const Mesh* mesh = assets.mesh(mr->mesh)) {
+            return transformAabb(mesh->bounds(), world);
+        }
+    }
+    // No mesh (a camera, a light, an empty group): a small box at its origin.
+    if (isIcon) *isIcon = true;
+    return Aabb::fromCenter(Vec3(world[3]), Vec3(IconRadius));
+}
+
+Entity pickEntity(const Scene& scene, RenderAssets& assets, const Ray& ray) {
+    Entity best;
+    float bestT = std::numeric_limits<float>::max();
+    scene.registry().each<Transform>([&](Entity e, const Transform&) {
+        if (const MeshRenderer* mr = scene.tryGet<MeshRenderer>(e); mr && !mr->visible) {
+            return; // can't click what you can't see
+        }
+        const auto t = intersect(ray, pickBounds(scene, assets, e));
+        // t == 0 means the ray starts inside the box: the camera is inside
+        // it (the editor camera often sits right on the scene's camera, or
+        // inside a big floor's box). You can't mean to click what surrounds
+        // you, so skip it. Ties go to the later entity: fine.
+        if (t && *t > 0.0f && *t <= bestT) {
+            bestT = *t;
+            best = e;
+        }
+    });
+    return best;
+}
+
+void SceneRenderer::submitIcons(const Scene& scene, RenderAssets& assets) {
+    // Entities with nothing to draw still need to be seen and clicked.
+    const Material cameraWire = wireMaterial(Vec3(0.9f));
+    const Material lightWire = wireMaterial(Vec3(1.0f, 0.85f, 0.2f));
+    const Material emptyWire = wireMaterial(Vec3(0.5f, 0.6f, 0.7f));
+    scene.registry().each<Transform>([&](Entity e, const Transform&) {
+        if (scene.has<MeshRenderer>(e) && assets.mesh(scene.get<MeshRenderer>(e).mesh)) {
+            return;
+        }
+        const Material& m = scene.has<LightComponent>(e)    ? lightWire
+                            : scene.has<CameraComponent>(e) ? cameraWire
+                                                            : emptyWire;
+        renderer_.submit(debugSphere_, m, Math::composeTRS(scene.worldPosition(e), Quat(1, 0, 0, 0), Vec3(IconRadius)));
+    });
+}
+
+void SceneRenderer::submitSelection(const Scene& scene, RenderAssets& assets) {
+    // A yellow box around what's selected, 2% larger to avoid z-fighting.
+    const Aabb box = pickBounds(scene, assets, selected);
+    renderer_.submit(debugCube_, wireMaterial(Vec3(1.0f, 0.8f, 0.1f)),
+                     Math::composeTRS(box.center(), Quat(1, 0, 0, 0), box.halfExtents() * 2.04f + Vec3(0.002f)));
 }
 
 void SceneRenderer::submitColliders(const Scene& scene) {

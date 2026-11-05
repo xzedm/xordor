@@ -112,11 +112,21 @@ TEST_SUITE("serializer") {
         REQUIRE(withSpin.fromJson(doc, loaded));
         CHECK(loaded.get<Spin>(loaded.findByName("Spinner")).degreesPerSecond == 45.0f);
 
-        // A serializer that doesn't know "spin" still loads the rest (and logs the skip).
+        // A serializer that doesn't know "spin" still loads the rest, and keeps
+        // "spin" as plain JSON so saving again doesn't lose it.
         Scene partial;
-        REQUIRE(SceneSerializer().fromJson(doc, partial));
-        CHECK(partial.has<Transform>(partial.findByName("Spinner")));
-        CHECK_FALSE(partial.has<Spin>(partial.findByName("Spinner")));
+        const SceneSerializer plain;
+        REQUIRE(plain.fromJson(doc, partial));
+        const Entity spinner = partial.findByName("Spinner");
+        CHECK(partial.has<Transform>(spinner));
+        CHECK_FALSE(partial.has<Spin>(spinner));
+        CHECK(plain.hasComponent(partial, spinner, "spin"));
+        CHECK(plain.saveComponent(partial, spinner, "spin")["degreesPerSecond"] == 45.0f);
+        CHECK(plain.toJson(partial)["entities"][0]["spin"] == doc["entities"][0]["spin"]);
+        // ...and the program that does know it reads it back intact.
+        Scene again;
+        REQUIRE(withSpin.fromJson(plain.toJson(partial), again));
+        CHECK(again.get<Spin>(again.findByName("Spinner")).degreesPerSecond == 45.0f);
     }
 
     TEST_CASE("a child listed before its parent still loads (hand-edited files)") {

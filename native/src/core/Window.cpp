@@ -187,6 +187,10 @@ bool Window::shouldClose() const {
     return glfwWindowShouldClose(handle_.get()) == GLFW_TRUE;
 }
 
+void Window::cancelClose() {
+    glfwSetWindowShouldClose(handle_.get(), GLFW_FALSE);
+}
+
 void Window::requestClose() {
     glfwSetWindowShouldClose(handle_.get(), GLFW_TRUE);
 }

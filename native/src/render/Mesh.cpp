@@ -45,6 +45,13 @@ Mesh::Mesh(const MeshData& data)
     : vao_(createVertexArray()), vertexBuffer_(createBuffer()), indexBuffer_(createBuffer()),
       indexCount_(static_cast<GLsizei>(data.indices.size())) {
     ENGINE_ASSERT(!data.vertices.empty() && data.indices.size() % 3 == 0, "a mesh needs vertices and whole triangles");
+    if (!data.vertices.empty()) {
+        bounds_ = {data.vertices[0].position, data.vertices[0].position};
+        for (const Vertex& v : data.vertices) {
+            bounds_.min = glm::min(bounds_.min, v.position);
+            bounds_.max = glm::max(bounds_.max, v.position);
+        }
+    }
 
     // Everything below is recorded into the VAO while it is bound.
     glBindVertexArray(vao_.id());

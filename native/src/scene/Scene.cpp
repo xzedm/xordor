@@ -29,11 +29,42 @@ void Transform::resetInterpolation() {
 // ---------------------------------------------------------------- entities
 
 Entity Scene::createEntity(const std::string& name) {
+    // Skip ids already taken by createEntityWithId.
+    while (entityOfId_.count(nextId_)) {
+        ++nextId_;
+    }
+    return createEntityWithId(name, nextId_);
+}
+
+Entity Scene::createEntityWithId(const std::string& name, SceneId id) {
+    if (id == 0 || entityOfId_.count(id)) {
+        return NullEntity;
+    }
     const Entity e = registry_.create();
     registry_.add<Name>(e, name);
     registry_.add<Transform>(e);
     registry_.add<Hierarchy>(e);
+    idOfEntity_[e] = id;
+    entityOfId_[id] = e;
+    nextId_ = std::max(nextId_, id + 1);
     return e;
+}
+
+SceneId Scene::reserveId() {
+    while (entityOfId_.count(nextId_)) {
+        ++nextId_;
+    }
+    return nextId_++;
+}
+
+SceneId Scene::idOf(Entity e) const {
+    const auto it = idOfEntity_.find(e);
+    return it == idOfEntity_.end() ? 0 : it->second;
+}
+
+Entity Scene::findById(SceneId id) const {
+    const auto it = entityOfId_.find(id);
+    return it == entityOfId_.end() ? NullEntity : it->second;
 }
 
 void Scene::destroyEntity(Entity e) {
@@ -48,6 +79,8 @@ void Scene::destroyEntity(Entity e) {
         }
     }
     detachFromParent(e);
+    entityOfId_.erase(idOf(e));
+    idOfEntity_.erase(e);
     registry_.destroy(e);
 }
 
@@ -87,6 +120,23 @@ bool Scene::isDescendantOf(Entity e, Entity ancestor) const {
         }
     }
     return false;
+}
+
+std::size_t Scene::siblingIndex(Entity e) const {
+    const std::vector<Entity>& siblings = childrenOf(parentOf(e));
+    const auto it = std::find(siblings.begin(), siblings.end(), e);
+    return it == siblings.end() ? 0 : static_cast<std::size_t>(it - siblings.begin());
+}
+
+void Scene::setSiblingIndex(Entity child, std::size_t index) {
+    const Entity parent = parentOf(child);
+    Hierarchy* h = parent.isNull() ? nullptr : registry_.tryGet<Hierarchy>(parent);
+    if (!h) {
+        return; // top-level entities are listed in creation order
+    }
+    auto& kids = h->children;
+    kids.erase(std::remove(kids.begin(), kids.end(), child), kids.end());
+    kids.insert(kids.begin() + static_cast<std::ptrdiff_t>(std::min(index, kids.size())), child);
 }
 
 std::vector<Entity> Scene::roots() const {

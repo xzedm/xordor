@@ -185,4 +185,4 @@ Choices that keep it readable and robust:
 - **Euler angles in files** can't express "the same rotation, written differently" (gimbal lock gives roll 0). They always load as the right rotation.
 - Tested on Linux with Mesa only; the Windows and macOS commands follow the same CMake flow but weren't run here.
 
-**Next: Phase 5, the editor.** A Dear ImGui window with docking panels: a viewport that renders the scene into a texture, with move/rotate/scale gizmos; an outliner built from the hierarchy; an inspector generated from the component list registered here; a content browser over the asset registry; and undo/redo through commands.
+**Next: [Phase 5, the editor](phase-5.md).** A Dear ImGui window with docking panels: a viewport that renders the scene into a texture, with move/rotate/scale gizmos; an outliner built from the hierarchy; an inspector generated from the component list registered here; a content browser over the asset registry; and undo/redo through commands.

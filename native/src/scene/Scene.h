@@ -20,10 +20,19 @@
 #include "scene/Components.h"
 #include "scene/Registry.h"
 
+#include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Engine {
+
+// A number that names one entity for the life of a scene, including after
+// saving and loading. Entity handles are only valid while the program runs
+// (and a re-created entity gets a new one), so anything that must refer to an
+// entity across time uses this instead: scene files ("id", "parent") and the
+// editor's undo history. 0 means "none".
+using SceneId = std::uint64_t;
 
 // Settings for the whole scene rather than one entity.
 struct SceneEnvironment {
@@ -38,6 +47,13 @@ public:
 
     // ---------------------------------------------------------------- entities
     Entity createEntity(const std::string& name = "Entity");
+    // The same, with a chosen id (loading a file, undoing a delete). Returns
+    // NullEntity if the id is 0 or already used.
+    Entity createEntityWithId(const std::string& name, SceneId id);
+    SceneId idOf(Entity e) const;     // 0 if the entity is gone
+    // An id no entity has used, handed out once (for createEntityWithId later).
+    SceneId reserveId();
+    Entity findById(SceneId id) const; // NullEntity if there's none
     // Destroys the entity and all its descendants (like deleting a folder).
     void destroyEntity(Entity e);
     bool isAlive(Entity e) const { return registry_.alive(e); }
@@ -71,6 +87,12 @@ public:
     Entity parentOf(Entity e) const;
     const std::vector<Entity>& childrenOf(Entity e) const;
     bool isDescendantOf(Entity e, Entity ancestor) const;
+    // Position among its parent's children. Top-level entities are always
+    // listed in creation order, so for them this is 0 and setting it does nothing.
+    std::size_t siblingIndex(Entity e) const;
+    // Moves a child to position `index` among its parent's children (clamped).
+    // Used by the outliner's drag-and-drop and by undo.
+    void setSiblingIndex(Entity child, std::size_t index);
     // Top-level entities, in creation order (handy for printing the tree).
     std::vector<Entity> roots() const;
 
@@ -96,6 +118,9 @@ private:
     void detachFromParent(Entity child);
 
     Registry registry_;
+    std::unordered_map<Entity, SceneId> idOfEntity_;
+    std::unordered_map<SceneId, Entity> entityOfId_;
+    SceneId nextId_ = 1;
 };
 
 } // namespace Engine

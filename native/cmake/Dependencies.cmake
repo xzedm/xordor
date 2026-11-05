@@ -70,6 +70,32 @@ target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
 add_library(cgltf INTERFACE)
 target_include_directories(cgltf SYSTEM INTERFACE ${cgltf_SOURCE_DIR})
 
+if(XE_BUILD_EDITOR)
+# ---------------------------------------------------------------- Dear ImGui: the editor's UI
+# The "docking" branch adds dockable, rearrangeable panels. ImGui has no CMake
+# file, so we build the core files and the two backends we need (GLFW for
+# input, OpenGL 3 for drawing) into our own static library.
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG        v1.91.5-docking
+  GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(imgui)
+add_library(imgui STATIC
+  ${imgui_SOURCE_DIR}/imgui.cpp
+  ${imgui_SOURCE_DIR}/imgui_demo.cpp     # ImGui::ShowDemoWindow, the best ImGui reference there is
+  ${imgui_SOURCE_DIR}/imgui_draw.cpp
+  ${imgui_SOURCE_DIR}/imgui_tables.cpp
+  ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_link_libraries(imgui PUBLIC glfw)
+# The editor loads a nicer font than ImGui's built-in pixel font, from here.
+set(XE_IMGUI_FONT_DIR ${imgui_SOURCE_DIR}/misc/fonts CACHE INTERNAL "")
+endif()
+
 # ---------------------------------------------------------------- doctest: unit tests
 if(XE_BUILD_TESTS)
   set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)

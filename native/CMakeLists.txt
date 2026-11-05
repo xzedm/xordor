@@ -22,6 +22,7 @@ endif()
 
 option(XE_BUILD_TESTS "Build the unit tests" ON)
 option(XE_BUILD_SANDBOX "Build the sandbox demo app" ON)
+option(XE_BUILD_EDITOR "Build the editor (downloads Dear ImGui)" ON)
 option(XE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(XE_GPU_TESTS "Also register the tests that open a hidden window and draw (need a GPU or a virtual display)" OFF)
 option(XE_GLFW_WAYLAND "Linux: build GLFW with native Wayland support (needs Wayland dev packages)" OFF)
@@ -56,6 +57,7 @@ add_library(XordorEngine STATIC
   src/render/Camera.cpp
   src/render/FlyCameraController.cpp
   src/render/ForwardRenderer.cpp
+  src/render/Framebuffer.cpp
   src/render/GLCheck.cpp
   src/render/Image.cpp
   src/render/Mesh.cpp
@@ -91,6 +93,11 @@ target_compile_definitions(XordorEngine PUBLIC
   XE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
 )
 xe_set_warnings(XordorEngine)
+
+# ---------------------------------------------------------------- the editor
+if(XE_BUILD_EDITOR)
+  add_subdirectory(src/editor)
+endif()
 
 # ---------------------------------------------------------------- apps and tests
 if(XE_BUILD_SANDBOX)

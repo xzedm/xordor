@@ -13,6 +13,7 @@
 // GPU uses that to tell front faces from back faces and skips the back ones
 // ("back-face culling"), roughly halving the work for closed shapes.
 
+#include "core/Geometry.h"
 #include "core/Math.h"
 #include "render/GLObject.h"
 
@@ -53,6 +54,9 @@ public:
 
     GLsizei indexCount() const { return indexCount_; }
     size_t triangleCount() const { return static_cast<size_t>(indexCount_) / 3; }
+    // The smallest box around every vertex, in the mesh's own space. Kept on
+    // the CPU (the vertex data itself lives only on the GPU) for picking and culling.
+    const Aabb& bounds() const { return bounds_; }
 
 private:
     // A vertex array object (VAO) remembers the buffer bindings and the vertex
@@ -62,6 +66,7 @@ private:
     GLBuffer vertexBuffer_;
     GLBuffer indexBuffer_;
     GLsizei indexCount_ = 0;
+    Aabb bounds_;
 };
 
 } // namespace Engine

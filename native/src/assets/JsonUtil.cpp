@@ -103,6 +103,13 @@ float readFloat(const Json& object, const char* key, float fallback) {
     return v->get<float>();
 }
 
+std::uint64_t readUInt64(const Json& object, const char* key, std::uint64_t fallback) {
+    const Json* v = field(object, key);
+    if (!v) return fallback;
+    if (!v->is_number_unsigned()) wrongType(key, "a whole number, 0 or more", *v);
+    return v->get<std::uint64_t>();
+}
+
 bool readBool(const Json& object, const char* key, bool fallback) {
     const Json* v = field(object, key);
     if (!v) return fallback;
