@@ -81,4 +81,23 @@ TEST_CASE("lookAt puts the target straight ahead of the camera") {
     CHECK(Math::nearlyEqual(Math::transformPoint(view, Vec3(0.0f, 2.0f, 0.0f)), Vec3(0.0f, 0.0f, -5.0f)));
 }
 
+TEST_CASE("normalMatrix keeps normals perpendicular under non-uniform scale") {
+    // A 45-degree slope in the XY plane: it runs along `tangent`, `normal` sticks out of it.
+    const Vec3 tangent = glm::normalize(Vec3(1.0f, -1.0f, 0.0f));
+    const Vec3 normal = glm::normalize(Vec3(1.0f, 1.0f, 0.0f));
+    const Mat4 stretchX = Math::composeTRS(Vec3(0.0f), Quat(1, 0, 0, 0), Vec3(2.0f, 1.0f, 1.0f));
+
+    // The surface itself (its tangent) is moved by the model matrix as usual.
+    const Vec3 worldTangent = Math::transformDirection(stretchX, tangent);
+    const Vec3 rightNormal = Math::normalMatrix(stretchX) * normal;
+    const Vec3 wrongNormal = Mat3(stretchX) * normal;
+
+    CHECK(glm::dot(rightNormal, worldTangent) == doctest::Approx(0.0f));
+    // With the model matrix itself the "normal" is no longer at a right angle to the surface.
+    CHECK(std::fabs(glm::dot(glm::normalize(wrongNormal), glm::normalize(worldTangent))) > 0.5f);
+    // For rotation only, the normal matrix is just the rotation.
+    const Mat4 turn = Math::composeTRS(Vec3(1, 2, 3), Math::quatFromEulerDegrees(Vec3(10, 70, -20)), Vec3(1.0f));
+    CHECK(Math::nearlyEqual(Mat4(Math::normalMatrix(turn)), Mat4(Mat3(turn)), 1e-5f));
+}
+
 } // TEST_SUITE

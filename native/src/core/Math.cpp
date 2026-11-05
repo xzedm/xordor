@@ -66,6 +66,12 @@ Vec3 transformDirection(const Mat4& m, const Vec3& direction) {
     return Vec3(m * Vec4(direction, 0.0f));
 }
 
+Mat3 normalMatrix(const Mat4& model) {
+    // TODO(performance): computed per draw on the CPU; cache it per object once
+    // transforms live in the scene graph (Phase 3) and only change when moved.
+    return glm::transpose(glm::inverse(Mat3(model)));
+}
+
 Mat4 perspective(float fovYRadians, float aspect, float zNear, float zFar) {
     // GLM's default clip space is OpenGL's (-1..1 depth, right-handed), which is
     // what we want. Vulkan and DirectX would need the zero-to-one variant.

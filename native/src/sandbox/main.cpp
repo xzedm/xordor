@@ -1,58 +1,68 @@
-// Sandbox, Phase 1: makes the main loop visible.
+// Sandbox, Phase 2: a small lit 3D scene.
 //
-// There is no renderer yet, so everything is drawn with one trick: glScissor
-// limits drawing to a rectangle, and glClear fills it. That draws solid boxes
-// with no shaders at all.
+// Shows every part of the renderer: meshes made in code (cube, plane, sphere),
+// a texture loaded from disk and one generated in memory, a fly camera, and one
+// directional light (the sun) with Blinn-Phong shading.
 //
 // What to look at:
-//   * The orange ball is simulated in onFixedUpdate at a fixed rate. Press 1-4
-//     to pick 10, 30, 60 or 120 Hz. At 10 Hz, press I to switch interpolation
-//     off: the ball jumps 10 times a second. Switch it back on: it moves
-//     smoothly again, although the simulation still runs only 10 times a second.
-//   * The blue player moves with WASD or the arrow keys, also in onFixedUpdate,
-//     so it moves the same distance per second at any frame rate.
-//   * Space jumps. The press is seen in onUpdate (once per frame) and remembered
-//     until the next fixed step uses it, so a quick tap is never lost.
-//   * The background color follows real time in onUpdate.
-//   * Click to move the ball to the mouse. Scroll to resize it.
-//   * V toggles vsync, F12 saves a screenshot, H prints help, Esc quits.
+//   * Hold the right mouse button and use WASD to fly, Q/E to go down/up, Shift
+//     to go faster, and the scroll wheel to change speed.
+//   * J/L turn the sun around, I/K raise and lower it. Watch the bright side of
+//     each crate follow it, and the highlights on the spheres move.
+//   * The five spheres go from dull (shininess 8) to sharp (shininess 128).
+//   * The white egg is a sphere scaled to (1.6, 0.6, 1). Its lighting is right
+//     because of the normal matrix (see Math::normalMatrix); the flat plank
+//     next to the crates is a scaled cube too.
+//   * The spinning crate turns in onFixedUpdate at 60 Hz; onRender blends its
+//     last two rotations (slerp), so it stays smooth at any frame rate.
+//   * Edit assets/shaders/lit.frag while this runs and save: the change shows up
+//     within half a second. Break it on purpose: the error is logged with the
+//     failing line, and the last good shader stays in use. R reloads by hand.
+//   * F1 wireframe, V vsync, F12 screenshot, H help, Esc quits.
 
 #include "core/Application.h"
 #include "core/Log.h"
 #include "core/Math.h"
+#include "core/Paths.h"
 #include "core/Screenshot.h"
-
-#include <glad/gl.h>
+#include "render/Camera.h"
+#include "render/FlyCameraController.h"
+#include "render/ForwardRenderer.h"
+#include "render/Image.h"
+#include "render/Mesh.h"
+#include "render/Primitives.h"
+#include "render/Texture.h"
 
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace Engine;
 
 namespace {
 
-// The demo world is 16 x 9 meters, stretched over the whole window.
-constexpr float WorldWidth = 16.0f;
-constexpr float WorldHeight = 9.0f;
-constexpr float GroundHeight = 0.6f;
-constexpr float Gravity = -18.0f; // m/s^2, stronger than Earth's: games feel floaty otherwise
-
-struct Body {
-    Vec2 position{0.0f};
-    Vec2 previous{0.0f}; // position at the previous fixed step, for interpolation
-    Vec2 velocity{0.0f};
-    Vec2 size{1.0f};
-};
+// Display-space (sRGB) sky color for the background.
+const Vec3 SkyColor{0.47f, 0.62f, 0.80f};
 
 struct Options {
     long long frames = 0;
-    double fixedHz = 60.0;
     bool vsync = true;
     std::string screenshotPath;
+};
+
+// One thing in the scene. Phase 3 replaces this with entities and components.
+struct Prop {
+    const Mesh* mesh;
+    Material material;
+    Vec3 position{0.0f};
+    Quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
+    Vec3 scale{1.0f};
 };
 
 class Sandbox final : public Application {
@@ -62,26 +72,39 @@ public:
 
 protected:
     void onStart() override {
-        ball_.position = ball_.previous = Vec2(4.0f, 6.0f);
-        ball_.velocity = Vec2(5.0f, 0.0f);
-        ball_.size = Vec2(0.8f);
-        player_.position = player_.previous = Vec2(8.0f, GroundHeight);
-        player_.size = Vec2(0.9f, 1.4f);
+        // The renderer and all GPU resources need the OpenGL context, which
+        // exists once the window does, so they are created here and not in the
+        // constructor's initializer list.
+        renderer_ = std::make_unique<ForwardRenderer>();
+        const IVec2 fb = window().framebufferSize();
+        renderer_->setViewport(fb.x, fb.y);
+
+        loadResources();
+        buildScene();
+        camera_.position = Vec3(0.0f, 3.0f, 9.0f);
+        camera_.lookAt(Vec3(0.0f, 0.8f, 0.0f));
         printHelp();
     }
 
-    // Runs at a fixed rate: everything here behaves the same at any frame rate.
     void onFixedUpdate(double dtSeconds) override {
-        const float dt = static_cast<float>(dtSeconds);
-        simulateBall(dt);
-        simulatePlayer(dt);
+        // The spinning crate: 90 degrees per second around a tilted axis.
+        previousSpin_ = spin_;
+        const Quat step = glm::angleAxis(Math::HalfPi * static_cast<float>(dtSeconds),
+                                         glm::normalize(Vec3(0.3f, 1.0f, 0.2f)));
+        // Re-normalizing stops tiny rounding errors from piling up over
+        // thousands of multiplications and slowly scaling the cube.
+        spin_ = glm::normalize(step * spin_);
     }
 
-    // Runs once per frame with the real frame time.
     void onUpdate(double frameSeconds) override {
-        backgroundPhase_ += static_cast<float>(frameSeconds) * 0.25f;
+        const float dt = static_cast<float>(frameSeconds);
+        flyCamera_.update(camera_, input(), dt);
+        if (flyCamera_.wantsCursorCaptured() != window().cursorCaptured()) {
+            window().setCursorCaptured(flyCamera_.wantsCursorCaptured());
+        }
+        moveSun(dt);
         handleKeys();
-        handleMouse();
+        renderer_->reloadShadersIfChanged(frameSeconds);
         refreshTitle(frameSeconds);
     }
 
@@ -90,104 +113,129 @@ protected:
         if (fb.x == 0 || fb.y == 0) {
             return; // minimized
         }
-        glDisable(GL_SCISSOR_TEST);
-        clearTo(backgroundColor());
-        glEnable(GL_SCISSOR_TEST);
+        camera_.aspect = static_cast<float>(fb.x) / static_cast<float>(fb.y);
 
-        fillRect(Vec2(0.0f), Vec2(WorldWidth, GroundHeight), Vec3(0.20f, 0.18f, 0.24f));
-        drawTimelineMarkers();
+        renderer_->beginFrame(camera_, sun_, SkyColor);
+        for (const Prop& prop : props_) {
+            renderer_->submit(*prop.mesh, prop.material, Math::composeTRS(prop.position, prop.rotation, prop.scale));
+        }
+        // Draw the spinning crate between its last two simulated rotations.
+        const Quat spin = glm::slerp(previousSpin_, spin_, static_cast<float>(alpha));
+        renderer_->submit(*cube_, crateMaterial_, Math::composeTRS(Vec3(2.5f, 1.4f, -1.0f), spin, Vec3(1.2f)));
+        renderer_->endFrame();
 
-        // Interpolation: draw where the body was a fraction `alpha` of the way
-        // from its previous fixed-step position to its current one. That lags a
-        // tiny bit (less than one step) but turns 10 jumps a second into smooth motion.
-        const float a = interpolate_ ? static_cast<float>(alpha) : 1.0f;
-        fillRect(Math::lerp(player_.previous, player_.position, a), player_.size, Vec3(0.25f, 0.62f, 1.0f));
-        fillRect(Math::lerp(ball_.previous, ball_.position, a), ball_.size, Vec3(1.0f, 0.62f, 0.18f));
-
-        glDisable(GL_SCISSOR_TEST);
         maybeTakeScreenshot(fb);
     }
 
-    void onShutdown() override {
-        ENGINE_INFO("Sandbox done. Ball bounced ", bounces_, " times");
+    void onFramebufferResize(int width, int height) override {
+        // run() reports the first size before onStart, when there's no renderer yet.
+        if (renderer_) {
+            renderer_->setViewport(width, height);
+        }
     }
 
 private:
-    // ---------------------------------------------------------------- simulation
-    void simulateBall(float dt) {
-        ball_.previous = ball_.position;
-        ball_.velocity.y += Gravity * dt;
-        ball_.position += ball_.velocity * dt;
-        // Bounce off the floor and the side walls, losing a little energy.
-        if (ball_.position.y < GroundHeight) {
-            ball_.position.y = GroundHeight;
-            ball_.velocity.y = std::fabs(ball_.velocity.y) * 0.92f;
-            if (ball_.velocity.y < 4.0f) {
-                ball_.velocity.y = 11.0f; // keep it bouncing forever for the demo
-            }
-            ++bounces_;
+    // ---------------------------------------------------------------- setup
+    void loadResources() {
+        cube_ = std::make_unique<Mesh>(Primitives::cube());
+        plane_ = std::make_unique<Mesh>(Primitives::plane());
+        sphere_ = std::make_unique<Mesh>(Primitives::sphere(0.5f, 48, 24));
+
+        std::string error;
+        if (auto texture = Texture::fromFile(assetPath("textures/crate.png"), {}, &error)) {
+            crate_ = std::make_unique<Texture>(std::move(*texture));
+        } else {
+            // Not fatal: the scene still makes sense with a stand-in texture,
+            // but say so loudly instead of quietly drawing something else.
+            ENGINE_WARN("Using a checkerboard instead of the crate texture: ", error);
+            crate_ = std::make_unique<Texture>(makeCheckerboard(64, 4, Vec3(0.8f, 0.5f, 0.2f), Vec3(0.4f, 0.2f, 0.1f)));
         }
-        const float maxX = WorldWidth - ball_.size.x;
-        if (ball_.position.x < 0.0f || ball_.position.x > maxX) {
-            ball_.position.x = Math::clamp(ball_.position.x, 0.0f, maxX);
-            ball_.velocity.x = -ball_.velocity.x;
-        }
+        // An image made in memory: a 1 m checkerboard for the ground.
+        ground_ = std::make_unique<Texture>(makeCheckerboard(256, 8, Vec3(0.55f), Vec3(0.42f)));
     }
 
-    void simulatePlayer(float dt) {
-        player_.previous = player_.position;
-        const Input& in = input();
-        float move = 0.0f;
-        if (in.isKeyDown(Key::A) || in.isKeyDown(Key::Left)) {
-            move -= 1.0f;
-        }
-        if (in.isKeyDown(Key::D) || in.isKeyDown(Key::Right)) {
-            move += 1.0f;
-        }
-        player_.velocity.x = move * 6.0f; // 6 m/s
+    void buildScene() {
+        crateMaterial_.albedo = crate_.get();
+        crateMaterial_.specular = 0.1f;
+        crateMaterial_.shininess = 16.0f;
 
-        const bool onGround = player_.position.y <= GroundHeight + 0.001f;
-        if (jumpQueued_ && onGround) {
-            player_.velocity.y = 9.0f;
+        Material ground;
+        ground.albedo = ground_.get();
+        // 200 m wide: big enough that its edge is hard to spot at the horizon.
+        // TODO(later phase): fog or a sky dome would hide the edge for good.
+        // 25 repeats of an 8-cell image -> 1 m squares.
+        ground.uvScale = Vec2(25.0f);
+        ground.specular = 0.05f;
+        props_.push_back({plane_.get(), ground, Vec3(0.0f), Quat(1, 0, 0, 0), Vec3(200.0f, 1.0f, 200.0f)});
+
+        // A stack of crates. The cube is 1 m, centered, so y = 0.5 sits on the ground.
+        addCrate(Vec3(-3.0f, 0.5f, -2.0f), 0.0f);
+        addCrate(Vec3(-1.8f, 0.5f, -2.3f), 20.0f);
+        addCrate(Vec3(-2.4f, 1.5f, -2.1f), -12.0f);
+        // Non-uniform scale: a flat plank lying on the ground.
+        props_.push_back({cube_.get(), crateMaterial_, Vec3(-2.3f, 0.125f, 0.4f),
+                          Math::quatFromEulerDegrees(Vec3(0.0f, 25.0f, 0.0f)), Vec3(3.0f, 0.25f, 1.0f)});
+
+        // Spheres from dull to shiny.
+        const Vec3 colors[] = {{0.85f, 0.20f, 0.20f}, {0.95f, 0.60f, 0.15f}, {0.30f, 0.75f, 0.30f},
+                               {0.20f, 0.45f, 0.90f}, {0.65f, 0.30f, 0.85f}};
+        const float shininess[] = {8.0f, 16.0f, 32.0f, 64.0f, 128.0f};
+        for (int i = 0; i < 5; ++i) {
+            Material m;
+            m.baseColor = colors[i];
+            m.specular = 0.6f;
+            m.shininess = shininess[i];
+            props_.push_back({sphere_.get(), m, Vec3(-3.0f + 1.5f * static_cast<float>(i), 0.5f, 2.2f),
+                              Quat(1, 0, 0, 0), Vec3(1.0f)});
         }
-        jumpQueued_ = false; // a press that comes while in the air is dropped, not saved for later
-        player_.velocity.y += Gravity * dt;
-        player_.position += player_.velocity * dt;
-        if (player_.position.y < GroundHeight) {
-            player_.position.y = GroundHeight;
-            player_.velocity.y = 0.0f;
-        }
-        player_.position.x = Math::clamp(player_.position.x, 0.0f, WorldWidth - player_.size.x);
+
+        // A squashed sphere: non-uniform scale with slanted normals, the case
+        // the normal matrix exists for. Its highlight sits where it should.
+        Material egg;
+        egg.baseColor = Vec3(0.9f);
+        egg.specular = 0.6f;
+        egg.shininess = 48.0f;
+        props_.push_back({sphere_.get(), egg, Vec3(5.2f, 0.3f, 1.0f), Math::quatFromEulerDegrees(Vec3(0, -30, 0)),
+                          Vec3(1.6f, 0.6f, 1.0f)});
+    }
+
+    void addCrate(const Vec3& position, float yawDegrees) {
+        props_.push_back({cube_.get(), crateMaterial_, position,
+                          Math::quatFromEulerDegrees(Vec3(0.0f, yawDegrees, 0.0f)), Vec3(1.0f)});
     }
 
     // ---------------------------------------------------------------- input
+    void moveSun(float dt) {
+        const Input& in = input();
+        const float turn = 1.2f * dt; // radians per second
+        if (in.isKeyDown(Key::J)) sunAzimuth_ += turn;
+        if (in.isKeyDown(Key::L)) sunAzimuth_ -= turn;
+        if (in.isKeyDown(Key::I)) sunElevation_ += turn;
+        if (in.isKeyDown(Key::K)) sunElevation_ -= turn;
+        // Below 3 degrees the ground would be lit from underneath at a grazing angle.
+        sunElevation_ = Math::clamp(sunElevation_, Math::toRadians(3.0f), Math::toRadians(89.0f));
+        // Spherical to Cartesian: the point on the sky where the sun is...
+        const Vec3 towardSun(std::cos(sunElevation_) * std::sin(sunAzimuth_), std::sin(sunElevation_),
+                             std::cos(sunElevation_) * std::cos(sunAzimuth_));
+        // ...and the light travels the other way, from the sun down to the scene.
+        sun_.direction = -towardSun;
+    }
+
     void handleKeys() {
         const Input& in = input();
-        // Edges ("pressed this frame") are read here, once per frame, never in
-        // onFixedUpdate: that may run zero times in a frame (and miss the press)
-        // or twice (and see it twice). We remember the request instead, and the
-        // next fixed step uses it.
-        if (in.wasKeyPressed(Key::Space) || in.wasKeyPressed(Key::W) || in.wasKeyPressed(Key::Up)) {
-            jumpQueued_ = true;
-        }
         if (in.wasKeyPressed(Key::Escape)) {
             quit();
         }
-        if (in.wasKeyPressed(Key::I)) {
-            interpolate_ = !interpolate_;
-            ENGINE_INFO("Interpolation ", interpolate_ ? "on" : "off");
+        if (in.wasKeyPressed(Key::R)) {
+            renderer_->reloadShaders();
+        }
+        if (in.wasKeyPressed(Key::F1)) {
+            renderer_->wireframe = !renderer_->wireframe;
+            ENGINE_INFO("Wireframe ", renderer_->wireframe ? "on" : "off");
         }
         if (in.wasKeyPressed(Key::V)) {
             window().setVSync(!window().vsync());
             ENGINE_INFO("Vsync ", window().vsync() ? "on" : "off");
-        }
-        const Key rateKeys[] = {Key::Num1, Key::Num2, Key::Num3, Key::Num4};
-        const double rates[] = {10.0, 30.0, 60.0, 120.0};
-        for (int i = 0; i < 4; ++i) {
-            if (in.wasKeyPressed(rateKeys[i])) {
-                timestep().setStepSeconds(1.0 / rates[i]);
-                ENGINE_INFO("Fixed update rate: ", rates[i], " Hz");
-            }
         }
         if (in.wasKeyPressed(Key::F12)) {
             screenshotRequested_ = true;
@@ -197,67 +245,12 @@ private:
         }
     }
 
-    void handleMouse() {
-        const Input& in = input();
-        if (in.wasMousePressed(MouseButton::Left)) {
-            const Vec2 world = windowToWorld(in.mousePosition());
-            ball_.position = ball_.previous = world - ball_.size * 0.5f;
-            ENGINE_INFO("Ball moved to (", world.x, ", ", world.y, ") m");
-        }
-        if (in.scrollDelta() != 0.0f) {
-            const float size = Math::clamp(ball_.size.x + in.scrollDelta() * 0.1f, 0.2f, 3.0f);
-            ball_.size = Vec2(size);
-        }
-    }
-
-    Vec2 windowToWorld(Vec2 windowPos) {
-        // Mouse coordinates are window units with the origin top-left;
-        // the demo world has its origin bottom-left. Flip y and scale.
-        const IVec2 win = window().windowSize();
-        return Vec2(windowPos.x / static_cast<float>(win.x) * WorldWidth,
-                    (1.0f - windowPos.y / static_cast<float>(win.y)) * WorldHeight);
-    }
-
-    // ---------------------------------------------------------------- drawing helpers
-    Vec3 backgroundColor() const {
-        // A slow drift between two dark blues, driven by real (variable) time.
-        const float t = 0.5f + 0.5f * std::sin(backgroundPhase_ * Math::TwoPi);
-        return Math::lerp(Vec3(0.07f, 0.08f, 0.13f), Vec3(0.10f, 0.13f, 0.22f), t);
-    }
-
-    static void clearTo(const Vec3& color) {
-        glClearColor(color.x, color.y, color.z, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    }
-
-    // Fills a rectangle given in world meters (origin bottom-left, like OpenGL's
-    // window coordinates, so only scaling is needed: no flip).
-    void fillRect(Vec2 minMeters, Vec2 sizeMeters, const Vec3& color) {
-        const IVec2 fb = window().framebufferSize();
-        const float sx = static_cast<float>(fb.x) / WorldWidth;
-        const float sy = static_cast<float>(fb.y) / WorldHeight;
-        const int x = static_cast<int>(std::lround(minMeters.x * sx));
-        const int y = static_cast<int>(std::lround(minMeters.y * sy));
-        const int w = static_cast<int>(std::lround(sizeMeters.x * sx));
-        const int h = static_cast<int>(std::lround(sizeMeters.y * sy));
-        glScissor(x, y, w, h);
-        clearTo(color);
-    }
-
-    // Ten ticks under the ground show how many fixed steps the last frame ran.
-    void drawTimelineMarkers() {
-        const int steps = stats().fixedStepsThisFrame;
-        for (int i = 0; i < 10; ++i) {
-            const Vec3 color = i < steps ? Vec3(0.45f, 0.95f, 0.55f) : Vec3(0.30f, 0.28f, 0.34f);
-            fillRect(Vec2(0.3f + static_cast<float>(i) * 0.35f, 0.15f), Vec2(0.25f, 0.3f), color);
-        }
-    }
-
+    // ---------------------------------------------------------------- output
     void maybeTakeScreenshot(const IVec2& fb) {
         // --screenshot saves the very last frame of a --frames run.
         const bool lastFrame = settings().maxFrames > 0 && stats().frame + 1 == settings().maxFrames;
         if (screenshotRequested_ || (lastFrame && !screenshotPath_.empty())) {
-            const std::string path = screenshotPath_.empty() ? "screenshot.ppm" : screenshotPath_;
+            const std::string path = screenshotPath_.empty() ? "screenshot.png" : screenshotPath_;
             saveScreenshot(path, fb.x, fb.y);
             screenshotRequested_ = false;
         }
@@ -269,46 +262,54 @@ private:
             return;
         }
         titleTimer_ = 0.0;
+        const RenderStats& s = renderer_->stats();
         std::ostringstream title;
         title.precision(1);
-        title << std::fixed << "Xordor Sandbox  |  " << stats().fps << " FPS  " << stats().frameMs << " ms  |  fixed "
-              << 1.0 / timestep().stepSeconds() << " Hz  |  interpolation " << (interpolate_ ? "on" : "off")
-              << "  |  vsync " << (window().vsync() ? "on" : "off");
+        title << std::fixed << "Xordor Sandbox  |  " << stats().fps << " FPS  " << stats().frameMs << " ms  |  "
+              << s.drawCalls << " draws, " << s.triangles << " triangles  |  camera " << flyCamera_.speed << " m/s";
         window().setTitle(title.str());
     }
 
     static void printHelp() {
-        ENGINE_INFO("Controls: A/D or arrows move, Space jumps, 1-4 fixed rate (10/30/60/120 Hz), "
-                    "I interpolation, V vsync, click moves the ball, scroll resizes it, F12 screenshot, Esc quits");
+        ENGINE_INFO("Controls: hold right mouse + WASD/QE to fly (Shift fast, scroll = speed), "
+                    "J/L/I/K move the sun, R reload shaders, F1 wireframe, V vsync, F12 screenshot, Esc quits");
     }
 
-    Body ball_;
-    Body player_;
-    bool jumpQueued_ = false;
-    bool interpolate_ = true;
+    // GPU objects must be deleted while the OpenGL context exists. It does here:
+    // C++ destroys these members before the Application base class, which
+    // owns the window (and with it the context).
+    std::unique_ptr<ForwardRenderer> renderer_;
+    std::unique_ptr<Mesh> cube_, plane_, sphere_;
+    std::unique_ptr<Texture> crate_, ground_;
+    Material crateMaterial_;
+    std::vector<Prop> props_;
+
+    Camera camera_;
+    FlyCameraController flyCamera_;
+    DirectionalLight sun_;
+    float sunAzimuth_ = Math::toRadians(35.0f);
+    float sunElevation_ = Math::toRadians(50.0f);
+    Quat spin_{1.0f, 0.0f, 0.0f, 0.0f};
+    Quat previousSpin_{1.0f, 0.0f, 0.0f, 0.0f};
+
     bool screenshotRequested_ = false;
     std::string screenshotPath_;
-    float backgroundPhase_ = 0.0f;
     double titleTimer_ = 0.0;
-    int bounces_ = 0;
 };
 
-// Tiny command-line parser: --frames N, --fixed-hz N, --no-vsync, --screenshot FILE.
+// Tiny command-line parser: --frames N, --no-vsync, --screenshot FILE.
 bool parseOptions(int argc, char** argv, Options& options) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         const bool hasValue = i + 1 < argc;
         if (arg == "--frames" && hasValue) {
             options.frames = std::atoll(argv[++i]);
-        } else if (arg == "--fixed-hz" && hasValue) {
-            options.fixedHz = std::atof(argv[++i]);
         } else if (arg == "--screenshot" && hasValue) {
             options.screenshotPath = argv[++i];
         } else if (arg == "--no-vsync") {
             options.vsync = false;
         } else {
-            ENGINE_ERROR("Unknown option ", arg,
-                         ". Options: --frames N, --fixed-hz N, --no-vsync, --screenshot FILE");
+            ENGINE_ERROR("Unknown option ", arg, ". Options: --frames N, --no-vsync, --screenshot FILE.png");
             return false;
         }
     }
@@ -322,14 +323,13 @@ int main(int argc, char** argv) {
     if (!parseOptions(argc, argv, options)) {
         return 2;
     }
-    // Everything that can fail (no display, no OpenGL 4.1 driver) throws from a
-    // constructor. Catching here turns that into a readable message and an
-    // exit code instead of a crash.
+    // Everything that can fail (no display, no OpenGL 4.1 driver, missing
+    // shaders) throws from a constructor. Catching here turns that into a
+    // readable message and an exit code instead of a crash.
     try {
         ApplicationSettings settings;
         settings.window.title = "Xordor Sandbox";
         settings.window.vsync = options.vsync;
-        settings.fixedUpdateHz = options.fixedHz;
         settings.maxFrames = options.frames;
         settings.logFile = "sandbox.log";
         Sandbox app(settings, options.screenshotPath);

@@ -32,7 +32,21 @@ FetchContent_Declare(glm
   GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(glfw glm)
+# ---------------------------------------------------------------- stb: image loading and writing
+# Single-file, public-domain libraries. stb has no release tags, so we pin a
+# commit. It also has no CMake file: we only download it and make our own
+# INTERFACE target that adds the include folder. The implementation is
+# compiled once, in render/StbImpl.cpp.
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG        db69a229ae5d89caff1d96b1af0c2a0fe0041c2b  # 2026-10-19: stb_image 2.30, stb_image_write 1.16
+)
+
+FetchContent_MakeAvailable(glfw glm stb)
+
+add_library(stb INTERFACE)
+# SYSTEM: warnings inside stb's headers are not ours to fix.
+target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
 # ---------------------------------------------------------------- doctest: unit tests
 if(XE_BUILD_TESTS)

@@ -72,6 +72,13 @@ Mat4 composeTRS(const Vec3& translation, const Quat& rotation, const Vec3& scale
 Vec3 transformPoint(const Mat4& m, const Vec3& point);
 Vec3 transformDirection(const Mat4& m, const Vec3& direction);
 
+// The matrix that turns object-space normals into world space: the inverse
+// transpose of the model matrix's upper 3x3. Using the model matrix itself
+// works for rotations and uniform scale, but a non-uniform scale (a sphere
+// squashed into an egg) would tilt slanted normals the wrong way, off the
+// surface. Shaders still normalize the result, since scale changes its length.
+Mat3 normalMatrix(const Mat4& model);
+
 // Camera matrices for OpenGL: clip-space depth goes from -1 (near) to +1 (far).
 Mat4 perspective(float fovYRadians, float aspect, float zNear, float zFar);
 Mat4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up = WorldUp);

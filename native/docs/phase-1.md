@@ -2,6 +2,8 @@
 
 **Status: done.** It builds, the tests pass, and the sandbox runs (checked on Linux: GCC 13 Debug and Clang Release builds with warnings as errors, and a GCC build under AddressSanitizer and UndefinedBehaviorSanitizer).
 
+> **Since Phase 2:** this demo is the `timestep_demo` program (`src/sandbox/timestep_demo.cpp`), and screenshots are PNG files. The name `sandbox` now belongs to the Phase 2 3D scene. The commands below use the new names.
+
 ## Plan
 
 **Goal:** a program that opens a window with an OpenGL 4.1 context, reads the keyboard and mouse, and runs a main loop with a fixed-rate simulation and a free-running render rate, plus logging and a math library ready for the renderer.
@@ -17,7 +19,7 @@
 | Window | `core/Window.h/.cpp` | RAII owner of the GLFW window and GL context; forwards OS events as callbacks |
 | Loop | `core/Application.h/.cpp` | Runs fixed updates, the variable update and rendering every frame; frame statistics |
 | Screenshots | `core/Screenshot.h/.cpp` | Saves the framebuffer to a `.ppm` image (F12); also lets an automated run check the output |
-| Sandbox | `sandbox/main.cpp` | A demo that makes fixed vs variable timesteps visible |
+| Sandbox | `sandbox/main.cpp` (now `timestep_demo.cpp`) | A demo that makes fixed vs variable timesteps visible |
 | Tests | `tests/` | Math, timestep, input and log tests that run without a window |
 
 ## Files added
@@ -68,7 +70,7 @@ cd xordor\native
 cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build -C Debug
-.\build\bin\Debug\sandbox.exe
+.\build\bin\Debug\timestep_demo.exe
 ```
 
 Visual Studio can also open the `native` folder directly (*File > Open > Folder*) and builds it with its CMake support.
@@ -82,7 +84,7 @@ cd xordor/native
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build
-./build/bin/sandbox
+./build/bin/timestep_demo
 ```
 
 macOS supports OpenGL up to 4.1, which is exactly what the engine asks for. On a Retina screen the framebuffer is twice the window size; the log shows both.
@@ -99,12 +101,12 @@ cd xordor/native
 cmake -S . -B build
 cmake --build build -j
 ctest --test-dir build
-./build/bin/sandbox
+./build/bin/timestep_demo
 ```
 
 Wayland desktops run it through XWayland. For native Wayland, install the Wayland dev packages and configure with `-DXE_GLFW_WAYLAND=ON`.
 
-### Sandbox controls and options
+### Timestep demo controls and options
 
 | Key | Does |
 |---|---|
@@ -114,10 +116,10 @@ Wayland desktops run it through XWayland. For native Wayland, install the Waylan
 | I | Interpolation on / off (try it at 10 Hz) |
 | V | Vsync on / off |
 | Click / scroll | Move the ball to the mouse / resize it |
-| F12 | Save `screenshot.ppm` |
+| F12 | Save `screenshot.png` |
 | H, Esc | Help, quit |
 
-Command line: `sandbox --frames 600 --fixed-hz 30 --no-vsync --screenshot out.ppm` runs 600 frames and saves the last one. The log is also written to `sandbox.log`.
+Command line: `timestep_demo --frames 600 --fixed-hz 30 --no-vsync --screenshot out.png` runs 600 frames and saves the last one. The log is also written to `timestep_demo.log`.
 
 ## How it works
 
@@ -203,13 +205,13 @@ The OS only exports OpenGL 1.1 functions directly. Everything newer (shaders, bu
 
 ## Known limitations and what comes next
 
-- **Drawing is scissor-and-clear only.** Phase 2 adds shaders, meshes, textures, a camera and a forward renderer.
-- **No OpenGL error reporting.** Debug output (`KHR_debug`) is core only from 4.3. Phase 2 adds a `glGetError` check helper for debug builds.
+- **Drawing is scissor-and-clear only.** Phase 2 adds shaders, meshes, textures, a camera and a forward renderer. *(Done in Phase 2.)*
+- **No OpenGL error reporting.** Debug output (`KHR_debug`) is core only from 4.3. Phase 2 adds a `glGetError` check helper for debug builds. *(Done in Phase 2: `XE_GL_CHECK`.)*
 - **Previous state is stored by hand** for interpolation (`Body::previous`). Phase 3's `Transform` component keeps the previous transform automatically.
 - **Input is basic.** No gamepads, text input, key rebinding or action mapping yet (Phase 6). Edges must be read in `onUpdate`, as described above.
-- **Screenshots are `.ppm`.** Phase 2 brings in stb and can write `.png`.
+- **Screenshots are `.ppm`.** Phase 2 brings in stb and can write `.png`. *(Done in Phase 2.)*
 - **Console colors are off on Windows** (marked `TODO` in `Log.cpp`: enabling virtual terminal processing).
 - **Tested on Linux only so far.** The Windows and macOS steps above follow each tool's standard workflow but were not run here; please report anything that fails.
 - doctest's CMake file prints a harmless "compatibility with CMake < 3.5" deprecation warning with CMake 3.27 and newer.
 
-**Next: Phase 2, renderer basics.** RAII wrappers for shaders, vertex buffers and textures; a perspective camera you can fly with the mouse; and a forward renderer that draws lit, textured cubes with one directional light.
+**Next: [Phase 2, renderer basics](phase-2.md).** RAII wrappers for shaders, vertex buffers and textures; a perspective camera you can fly with the mouse; and a forward renderer that draws lit, textured cubes with one directional light.

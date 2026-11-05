@@ -3,7 +3,7 @@
 #   cmake -S . -B build
 #   cmake --build build
 #
-# The first configure downloads GLFW, GLM and doctest with git (see cmake/Dependencies.cmake).
+# The first configure downloads GLFW, GLM, stb and doctest with git (see cmake/Dependencies.cmake).
 
 cmake_minimum_required(VERSION 3.20)
 project(XordorEngine VERSION 0.1.0 LANGUAGES C CXX)
@@ -23,6 +23,7 @@ endif()
 option(XE_BUILD_TESTS "Build the unit tests" ON)
 option(XE_BUILD_SANDBOX "Build the sandbox demo app" ON)
 option(XE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(XE_GPU_TESTS "Also register the tests that open a hidden window and draw (need a GPU or a virtual display)" OFF)
 option(XE_GLFW_WAYLAND "Linux: build GLFW with native Wayland support (needs Wayland dev packages)" OFF)
 
 # Put every program in build/bin so they are easy to find on all platforms.
@@ -39,9 +40,21 @@ add_library(XordorEngine STATIC
   src/core/Input.cpp
   src/core/Log.cpp
   src/core/Math.cpp
+  src/core/Paths.cpp
   src/core/Screenshot.cpp
   src/core/Time.cpp
   src/core/Window.cpp
+  src/render/Camera.cpp
+  src/render/FlyCameraController.cpp
+  src/render/ForwardRenderer.cpp
+  src/render/GLCheck.cpp
+  src/render/Image.cpp
+  src/render/Mesh.cpp
+  src/render/Primitives.cpp
+  src/render/Shader.cpp
+  src/render/ShaderLog.cpp
+  src/render/StbImpl.cpp
+  src/render/Texture.cpp
 )
 add_library(Xordor::Engine ALIAS XordorEngine)
 
@@ -50,13 +63,18 @@ target_include_directories(XordorEngine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 # GLM and glad are PUBLIC because engine headers and apps use them directly.
 # GLFW is PRIVATE: only Window.cpp talks to it, so apps never see GLFW types.
+# stb is PRIVATE too: Image.h wraps it.
 target_link_libraries(XordorEngine
   PUBLIC glm::glm glad
-  PRIVATE glfw
+  PRIVATE glfw stb
 )
 target_compile_definitions(XordorEngine PUBLIC
   GLM_FORCE_XYZW_ONLY    # vec.x/.y/.z/.w only (no .r/.s aliases): clearer and faster to compile
   GLFW_INCLUDE_NONE      # glad provides the OpenGL declarations, not GLFW
+  # Where shaders and textures live. Programs read them straight from the
+  # source tree, so an edited shader is picked up without rebuilding. The
+  # XORDOR_ASSETS environment variable overrides it (see core/Paths.h).
+  XE_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
 )
 xe_set_warnings(XordorEngine)
 
