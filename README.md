@@ -1,5 +1,7 @@
 # Xordor
 
+> **Also in this repository:** [`native/`](native/README.md) holds **Xordor Engine**, a small C++17 / OpenGL engine built step by step for learning (window, main loop, renderer, ECS, editor, Lua scripting). The rest of this README is about the Xordor desktop app.
+
 **A 3D game engine for your computer, made to be much easier than Unity or Unreal.**
 
 Xordor is a desktop app for Windows, macOS and Linux. It has two ways to work on the same games:

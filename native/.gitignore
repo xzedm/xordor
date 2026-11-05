@@ -1,0 +1,12 @@
+# CMake build folders
+build/
+build-*/
+out/
+# Files the sandbox writes
+*.log
+*.ppm
+# IDE folders
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
